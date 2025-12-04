@@ -1,0 +1,53 @@
+[tool.poetry]
+name = "hackathon-services"
+version = "0.1.0"
+description = "Django REST API services for hackathon projects"
+authors = ["Dev Shack Academy"]
+packages = [{include = "api"}, {include = "config"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+django = "^4.2"
+djangorestframework = "^3.14.0"
+django-cors-headers = "^4.0.0"
+psycopg2-binary = "^2.9.0"
+python-decouple = "^3.8"
+dj-database-url = "^2.1.0"
+drf-yasg = "^1.21.7"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.3.0"
+pytest = "^8.4.2"
+pytest-django = "^4.8.0"
+ipython = "^9.5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-services = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 119
+indent-width = 4
+target-version = "py311"
+src = ["api", "config"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I001"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402"]
+"**/migrations/*" = ["E501"]
+"**/tests/*" = ["E402"]
+
+[tool.ruff.lint.isort]
+case-sensitive = true
+
+[tool.ruff.lint.isort.sections]
+"django" = ["django"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["."]
+testpaths = ["api/tests"]
