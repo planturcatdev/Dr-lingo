@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import ChatService, { ChatRoom } from '../api/services/ChatService';
+import AddPatientContext from './AddPatientContext';
+import { Description } from '@mui/icons-material';
 
 interface ChatRoomListProps {
   onSelectRoom: (roomId: number, userType: 'patient' | 'doctor') => void;
@@ -8,7 +10,12 @@ interface ChatRoomListProps {
 function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showContextDialog, setShowContextDialog] = useState<{
+    roomId: number;
+    roomName: string;
+    collection?: number;
+  } | null>(null);
   const [newRoom, setNewRoom] = useState({
     name: '',
     patient_language: 'en',
@@ -42,7 +49,7 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
       });
 
       setNewRoom({ name: '', patient_language: 'en', doctor_language: 'es' });
-      setShowCreateForm(false);
+      setShowCreateDialog(false);
       await loadRooms();
     } catch (err) {
       console.error('Failed to create room:', err);
@@ -59,7 +66,11 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
     { code: 'hi', name: 'Hindi' },
     { code: 'pt', name: 'Portuguese' },
     { code: 'ru', name: 'Russian' },
+    { code: 'afr', name: 'Afrikaans' },
     { code: 'ja', name: 'Japanese' },
+    { code: 'zulu', name: 'Zulu' },
+    { code: 'tsawana', name: 'Tswana' },
+    { code: 'xhosa', name: 'Xhosa' },
   ];
 
   if (loading) {
@@ -69,92 +80,149 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800">Translation Chat Rooms</h2>
+        <h2 className="text-2xl font-bold text-gray-900">Translation Chat Rooms</h2>
         <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
+          onClick={() => setShowCreateDialog(true)}
+          className="bg-black hover:bg-gray-800 text-white font-semibold px-6 py-2 rounded-lg transition-colors"
         >
-          {showCreateForm ? 'Cancel' : '+ New Room'}
+          New Room
         </button>
       </div>
 
-      {showCreateForm && (
-        <div className="bg-white border-2 border-gray-200 rounded-xl p-6">
-          <h3 className="text-xl font-bold mb-4">Create New Chat Room</h3>
-          <form onSubmit={handleCreateRoom} className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold mb-2">Room Name</label>
-              <input
-                type="text"
-                value={newRoom.name}
-                onChange={(e) => setNewRoom({ ...newRoom, name: e.target.value })}
-                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none"
-                placeholder="e.g., Emergency Consultation"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold mb-2">Patient Language</label>
-                <select
-                  value={newRoom.patient_language}
-                  onChange={(e) => setNewRoom({ ...newRoom, patient_language: e.target.value })}
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none"
+      {/* Create Room Dialog */}
+      {showCreateDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-900">Create New Chat Room</h3>
+                <button
+                  onClick={() => setShowCreateDialog(false)}
+                  className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
                 >
-                  {languages.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.name}
-                    </option>
-                  ))}
-                </select>
+                  ×
+                </button>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold mb-2">Doctor Language</label>
-                <select
-                  value={newRoom.doctor_language}
-                  onChange={(e) => setNewRoom({ ...newRoom, doctor_language: e.target.value })}
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none"
-                >
-                  {languages.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+              <form onSubmit={handleCreateRoom} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-2 text-gray-700">
+                    Room Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newRoom.name}
+                    onChange={(e) => setNewRoom({ ...newRoom, name: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none text-black placeholder:text-gray-400"
+                    placeholder="e.g., Emergency Consultation"
+                    required
+                  />
+                </div>
 
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
-            >
-              Create Room
-            </button>
-          </form>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 text-gray-700">
+                      Patient Language
+                    </label>
+                    <select
+                      value={newRoom.patient_language}
+                      onChange={(e) => setNewRoom({ ...newRoom, patient_language: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none text-black"
+                    >
+                      {languages.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-2 text-gray-700">
+                      Doctor Language
+                    </label>
+                    <select
+                      value={newRoom.doctor_language}
+                      onChange={(e) => setNewRoom({ ...newRoom, doctor_language: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none text-black"
+                    >
+                      {languages.map((lang) => (
+                        <option key={lang.code} value={lang.code}>
+                          {lang.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateDialog(false)}
+                    className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-6 py-3 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-black hover:bg-gray-800 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+                  >
+                    Create Room
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
 
       <div className="grid gap-4">
         {rooms.length === 0 ? (
-          <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-gray-200">
-            <p className="text-gray-500">No chat rooms yet. Create one to get started!</p>
+          <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+            <p className="text-gray-500">No chat rooms yet. Create one to get started.</p>
           </div>
         ) : (
           rooms.map((room) => (
             <div
               key={room.id}
-              className="bg-white border-2 border-gray-200 rounded-xl p-6 hover:border-blue-400 transition-colors"
+              className="bg-white border border-gray-200 rounded-lg p-6 hover:border-gray-400 transition-colors shadow-sm"
             >
               <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-800">{room.name}</h3>
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold text-gray-900">{room.name}</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    🏥 Patient: {languages.find((l) => l.code === room.patient_language)?.name} • 👨‍⚕️
+                    Patient: {languages.find((l) => l.code === room.patient_language)?.name} •
                     Doctor: {languages.find((l) => l.code === room.doctor_language)?.name}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">{room.message_count || 0} messages</p>
+
+                  {/* RAG Status */}
+                  {room.has_rag ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-semibold">
+                        <Description className="w-3 h-3" />
+                        RAG: {room.rag_collection_name}
+                      </span>
+                      {room.patient_name && (
+                        <span className="text-xs text-gray-600">Patient: {room.patient_name}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowContextDialog({
+                          roomId: room.id,
+                          roomName: room.name,
+                          collection: room.rag_collection,
+                        });
+                      }}
+                      className="mt-2 inline-flex items-center gap-1 px-3 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded text-xs font-semibold transition-colors"
+                    >
+                      <Description className="w-3 h-3" />
+                      Add Context
+                    </button>
+                  )}
                 </div>
                 <span
                   className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -180,13 +248,13 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
               <div className="flex gap-2">
                 <button
                   onClick={() => onSelectRoom(room.id, 'patient')}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+                  className="flex-1 bg-gray-900 hover:bg-gray-800 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
                 >
                   Join as Patient
                 </button>
                 <button
                   onClick={() => onSelectRoom(room.id, 'doctor')}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors"
                 >
                   Join as Doctor
                 </button>
@@ -195,6 +263,17 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
           ))
         )}
       </div>
+
+      {/* Add Patient Context Dialog */}
+      {showContextDialog && (
+        <AddPatientContext
+          roomId={showContextDialog.roomId}
+          roomName={showContextDialog.roomName}
+          currentCollection={showContextDialog.collection}
+          onClose={() => setShowContextDialog(null)}
+          onSuccess={loadRooms}
+        />
+      )}
     </div>
   );
 }

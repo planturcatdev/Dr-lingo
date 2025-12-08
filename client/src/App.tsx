@@ -37,9 +37,9 @@ function Home() {
           <div>
             <Link
               to="/translation-chat"
-              className="inline-block bg-blue-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-blue-700 transition-colors text-lg"
+              className="inline-block bg-gray-900 text-white px-8 py-4 rounded-lg font-semibold hover:bg-gray-800 transition-colors text-lg"
             >
-              🏥 Translation Chat →
+              Translation Chat →
             </Link>
           </div>
         </div>

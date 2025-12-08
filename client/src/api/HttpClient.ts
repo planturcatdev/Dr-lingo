@@ -5,7 +5,7 @@ import axios, { AxiosError, AxiosResponse } from 'axios';
  * Use httpClient instance to configure axios http instance.
  */
 const httpClient = axios.create({
-  timeout: 10000,
+  timeout: 60000, // 60 seconds for AI operations
   headers: {
     'Content-Type': 'application/json',
   },

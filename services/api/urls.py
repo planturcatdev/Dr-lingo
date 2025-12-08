@@ -13,6 +13,7 @@ The router automatically creates standard REST endpoints for ViewSets.
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .rag_views import CollectionItemViewSet, CollectionViewSet
 from .views import ChatMessageViewSet, ChatRoomViewSet, ItemViewSet, health_check
 
 # Create a router and register viewsets
@@ -20,6 +21,8 @@ router = DefaultRouter()
 router.register(r"items", ItemViewSet, basename="item")
 router.register(r"chat-rooms", ChatRoomViewSet, basename="chatroom")
 router.register(r"messages", ChatMessageViewSet, basename="message")
+router.register(r"collections", CollectionViewSet, basename="collection")
+router.register(r"collection-items", CollectionItemViewSet, basename="collectionitem")
 
 urlpatterns = [
     path("", include(router.urls)),

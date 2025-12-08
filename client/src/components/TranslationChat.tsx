@@ -1,5 +1,87 @@
 import { useState, useEffect, useRef } from 'react';
+import { Mic, Stop, VolumeUp, Psychology, Info, Refresh } from '@mui/icons-material';
 import ChatService, { ChatRoom, ChatMessage } from '../api/services/ChatService';
+import PatientContextManager from './PatientContextManager';
+import Description from '@mui/icons-material/Description';
+
+interface MessageBubbleProps {
+  message: ChatMessage;
+  isMyMessage: boolean;
+  getLanguageLabel: (lang: string) => string;
+}
+
+function MessageBubble({ message, isMyMessage, getLanguageLabel }: MessageBubbleProps) {
+  const [showOriginal, setShowOriginal] = useState(false);
+
+  // Determine what to display
+  const displayText = showOriginal ? message.original_text : message.translated_text;
+  const displayLang = showOriginal ? message.original_language : message.translated_language;
+
+  return (
+    <div className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[75%] rounded-lg p-4 shadow-sm relative group ${
+          isMyMessage ? 'bg-black text-white' : 'bg-white border border-gray-200 text-gray-900'
+        }`}
+      >
+        {/* Toggle Button - Shows on hover */}
+        {message.translated_text && (
+          <button
+            onClick={() => setShowOriginal(!showOriginal)}
+            className={`absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded text-xs font-medium ${
+              isMyMessage
+                ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+            }`}
+          >
+            {showOriginal ? 'Show Translation' : 'Show Original'}
+          </button>
+        )}
+
+        <div className="flex items-center gap-2 mb-3">
+          <span
+            className={`text-xs font-bold uppercase tracking-wide ${
+              isMyMessage ? 'text-gray-300' : 'text-gray-600'
+            }`}
+          >
+            {message.sender_type === 'patient' ? 'Patient' : 'Doctor'}
+          </span>
+          <span className={`text-xs ${isMyMessage ? 'text-gray-400' : 'text-gray-500'}`}>
+            {new Date(message.created_at).toLocaleTimeString()}
+          </span>
+        </div>
+
+        {/* Audio playback */}
+        {message.has_audio && message.audio_url && (
+          <div className={`mb-3 p-2 rounded ${isMyMessage ? 'bg-gray-800' : 'bg-gray-50'}`}>
+            <div className="flex items-center gap-2">
+              <VolumeUp className="w-4 h-4" />
+              <audio src={message.audio_url} controls className="h-8 flex-1" />
+            </div>
+          </div>
+        )}
+
+        {/* Message text - Shows translation by default, original on toggle */}
+        <div>
+          <p className="text-base leading-relaxed">{displayText || message.original_text}</p>
+          <p className={`text-xs mt-1 ${isMyMessage ? 'text-gray-400' : 'text-gray-500'}`}>
+            {showOriginal ? 'Original' : 'Translation'}: {getLanguageLabel(displayLang)}
+          </p>
+        </div>
+
+        {/* Image description */}
+        {message.image_description && (
+          <div
+            className={`mt-3 pt-3 border-t ${isMyMessage ? 'border-gray-700' : 'border-gray-200'}`}
+          >
+            <p className="text-xs font-semibold mb-1">Image Analysis</p>
+            <p className="text-xs opacity-80">{message.image_description}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface TranslationChatProps {
   roomId: number;
@@ -12,23 +94,30 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
+  const [audioPreviewURL, setAudioPreviewURL] = useState<string | null>(null);
+  const [doctorAssistance, setDoctorAssistance] = useState<any>(null);
+  const [loadingAssistance, setLoadingAssistance] = useState(false);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     loadChatRoom();
     loadMessages();
-    // Poll for new messages every 3 seconds
     const interval = setInterval(loadMessages, 3000);
     return () => clearInterval(interval);
   }, [roomId]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Cleanup audio URL on unmount or when it changes
+    return () => {
+      if (audioPreviewURL) {
+        URL.revokeObjectURL(audioPreviewURL);
+      }
+    };
+  }, [audioPreviewURL]);
 
   const loadChatRoom = async () => {
     try {
@@ -37,6 +126,24 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
     } catch (err) {
       setError('Failed to load chat room');
       console.error(err);
+    }
+  };
+
+  const loadDoctorAssistance = async () => {
+    if (!room?.rag_collection) return;
+
+    setLoadingAssistance(true);
+    setError(null); // Clear any previous errors
+    try {
+      const assistance = await ChatService.getDoctorAssistance(roomId);
+      console.log('Doctor assistance loaded:', assistance);
+      setDoctorAssistance(assistance);
+    } catch (err: any) {
+      console.error('Failed to load doctor assistance:', err);
+      const errorMsg = err.response?.data?.message || err.message || 'Failed to load AI assistance';
+      setDoctorAssistance({ status: 'error', message: errorMsg });
+    } finally {
+      setLoadingAssistance(false);
     }
   };
 
@@ -49,21 +156,98 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
     }
   };
 
+  // Speech-to-Text Recognition
+  const startSpeechRecognition = () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setError('Speech recognition not supported in this browser');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      let final = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += transcript + ' ';
+        } else {
+          interim += transcript;
+        }
+      }
+
+      if (final) {
+        setNewMessage((prev) => prev + final);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsRecording(false);
+      setError('Speech recognition error: ' + event.error);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  const stopSpeechRecognition = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleToggleRecording = () => {
+    if (isRecording) {
+      stopSpeechRecognition();
+    } else {
+      startSpeechRecognition();
+    }
+  };
+
+  const handleClearAudio = () => {
+    if (audioPreviewURL) {
+      URL.revokeObjectURL(audioPreviewURL);
+    }
+    setRecordedAudio(null);
+    setAudioPreviewURL(null);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() && !recordedAudio) return;
 
     try {
       setLoading(true);
       setError(null);
 
-      await ChatService.sendMessage(roomId, {
+      const messageData: any = {
         sender_type: userType,
-        text: newMessage,
-      });
+        text: newMessage || '[Voice Message]',
+      };
 
+      // Add audio if recorded
+      if (recordedAudio) {
+        const base64Audio = await ChatService.audioBlobToBase64(recordedAudio);
+        messageData.audio = base64Audio;
+      }
+
+      await ChatService.sendMessage(roomId, messageData);
       setNewMessage('');
+      handleClearAudio();
       await loadMessages();
     } catch (err) {
       setError('Failed to send message');
@@ -82,6 +266,9 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
       zh: 'Chinese',
       ar: 'Arabic',
       hi: 'Hindi',
+      pt: 'Portuguese',
+      ru: 'Russian',
+      ja: 'Japanese',
     };
     return languages[lang] || lang;
   };
@@ -98,117 +285,220 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
   const otherLanguage = userType === 'patient' ? room.doctor_language : room.patient_language;
 
   return (
-    <div className="flex flex-col h-[600px] bg-white rounded-xl shadow-lg border-2 border-gray-200">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-xl">
-        <h2 className="text-xl font-bold">{room.name}</h2>
-        <p className="text-sm text-blue-100">
-          You speak {getLanguageLabel(myLanguage)} • Other person speaks{' '}
-          {getLanguageLabel(otherLanguage)}
-        </p>
-        <p className="text-xs text-blue-200 mt-1">
-          Role: {userType === 'patient' ? '🏥 Patient' : '👨‍⚕️ Doctor'}
-        </p>
+    <div className="flex gap-4">
+      {/* Main Chat */}
+      <div className="flex-1 flex flex-col h-[700px] bg-white rounded-lg shadow-xl border border-gray-200">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-6 rounded-t-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold mb-2">{room.name}</h2>
+              <div className="flex items-center gap-4 text-sm">
+                <span className="bg-white/10 px-3 py-1 rounded-full">
+                  You: {getLanguageLabel(myLanguage)}
+                </span>
+                <span className="text-gray-400">→</span>
+                <span className="bg-white/10 px-3 py-1 rounded-full">
+                  Other: {getLanguageLabel(otherLanguage)}
+                </span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-gray-300 mb-1">Your Role</div>
+              <div className="bg-white/20 px-4 py-2 rounded-lg font-semibold">
+                {userType === 'patient' ? 'Patient' : 'Doctor'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center">
+              <div className="text-gray-400 text-lg mb-2">No messages yet</div>
+              <div className="text-gray-500 text-sm">Start the conversation below</div>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isMyMessage={message.sender_type === userType}
+                getLanguageLabel={getLanguageLabel}
+              />
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <form
+          onSubmit={handleSendMessage}
+          className="p-6 bg-white border-t border-gray-200 rounded-b-lg"
+        >
+          {error && (
+            <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 p-3 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          {/* Audio Preview */}
+          {audioPreviewURL && (
+            <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-center gap-3">
+                <VolumeUp className="w-5 h-5 text-purple-600" />
+                <audio src={audioPreviewURL} controls className="flex-1 h-8" />
+                <button
+                  type="button"
+                  onClick={handleClearAudio}
+                  className="text-red-600 hover:text-red-700 text-sm font-medium"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder={`Type your message in ${getLanguageLabel(myLanguage)}...`}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none transition-all text-black placeholder:text-gray-400"
+              disabled={loading}
+            />
+
+            {/* Speech-to-Text Button */}
+            <button
+              type="button"
+              onClick={handleToggleRecording}
+              className={`p-3 rounded-lg transition-colors ${
+                isRecording
+                  ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
+                  : 'bg-purple-600 hover:bg-purple-700 text-white'
+              }`}
+              title={isRecording ? 'Stop recording speech' : 'Start speech-to-text'}
+            >
+              {isRecording ? <Stop className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+
+            <button
+              type="submit"
+              disabled={loading || (!newMessage.trim() && !recordedAudio)}
+              className="bg-black hover:bg-gray-800 text-white font-semibold px-8 py-3 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Sending...' : 'Send'}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-gray-500">
+              Messages are automatically translated to {getLanguageLabel(otherLanguage)}
+            </p>
+            <p className="text-xs text-gray-500">
+              Click <Mic className="w-3 h-3 inline" /> for speech-to-text
+            </p>
+          </div>
+        </form>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-        {messages.length === 0 ? (
-          <div className="text-center text-gray-400 mt-8">
-            No messages yet. Start the conversation!
+      {/* RAG Context Panel */}
+      {room.rag_collection && userType === 'doctor' && (
+        <div className="w-80 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden flex flex-col h-[700px]">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Psychology className="w-5 h-5" />
+              <h3 className="font-bold text-lg">Patient Context</h3>
+            </div>
+            <p className="text-xs text-purple-100">RAG-Enhanced Information</p>
           </div>
-        ) : (
-          messages.map((message) => {
-            const isMyMessage = message.sender_type === userType;
 
-            return (
-              <div
-                key={message.id}
-                className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[70%] rounded-lg p-3 ${
-                    isMyMessage
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white border-2 border-gray-200 text-gray-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-semibold opacity-75">
-                      {message.sender_type === 'patient' ? '🏥 Patient' : '👨‍⚕️ Doctor'}
-                    </span>
-                  </div>
+          {/* Content */}
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+            {/* Patient Context Manager */}
+            <PatientContextManager
+              roomId={roomId}
+              roomName={room.name}
+              currentCollection={room.rag_collection}
+              onUpdate={loadChatRoom}
+            />
 
-                  {/* Original text (what they typed) */}
-                  <div className="mb-2">
-                    <p className="text-sm font-medium">{message.original_text}</p>
-                    <p className="text-xs opacity-60 mt-1">
-                      Original ({getLanguageLabel(message.original_language)})
-                    </p>
-                  </div>
+            {/* Doctor Assistance Button */}
+            <button
+              onClick={loadDoctorAssistance}
+              disabled={loadingAssistance}
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-3 rounded-lg transition-colors disabled:bg-gray-400 text-sm flex items-center justify-center gap-2"
+            >
+              {loadingAssistance ? (
+                <>
+                  <Refresh className="w-4 h-4 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <Psychology className="w-4 h-4" />
+                  Get AI Assistance
+                </>
+              )}
+            </button>
 
-                  {/* Translated text */}
-                  {message.translated_text && (
-                    <div
-                      className={`pt-2 border-t ${isMyMessage ? 'border-blue-400' : 'border-gray-200'}`}
-                    >
-                      <p className="text-sm italic">{message.translated_text}</p>
-                      <p className="text-xs opacity-60 mt-1">
-                        Translation ({getLanguageLabel(message.translated_language)})
-                      </p>
+            {/* AI Suggestions or Error */}
+            {doctorAssistance && doctorAssistance.status === 'success' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 max-h-96 overflow-y-auto">
+                <div className="flex items-center gap-2 mb-2">
+                  <Psychology className="w-4 h-4 text-blue-600" />
+                  <p className="text-xs font-semibold text-blue-900">AI Suggestions</p>
+                </div>
+                <div className="text-xs text-blue-800 whitespace-pre-wrap leading-relaxed">
+                  {doctorAssistance.assistance}
+                </div>
+                {doctorAssistance.sources && doctorAssistance.sources.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-blue-200">
+                    <p className="text-xs font-semibold text-blue-900 mb-2">Sources</p>
+                    <div className="space-y-1">
+                      {doctorAssistance.sources.map((source: any, idx: number) => (
+                        <div key={idx} className="flex items-start gap-2 text-xs text-blue-700">
+                          <span className="text-blue-500">•</span>
+                          <span>
+                            {source.name} ({(source.similarity * 100).toFixed(0)}% match)
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  )}
+                  </div>
+                )}
+              </div>
+            )}
 
-                  {/* Image description if available */}
-                  {message.image_description && (
-                    <div
-                      className={`mt-2 pt-2 border-t ${isMyMessage ? 'border-blue-400' : 'border-gray-200'}`}
-                    >
-                      <p className="text-xs font-semibold mb-1">📷 Image Analysis:</p>
-                      <p className="text-xs">{message.image_description}</p>
-                    </div>
-                  )}
+            {doctorAssistance && doctorAssistance.status === 'error' && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-red-600" />
+                  <p className="text-xs font-semibold text-red-900">Error</p>
+                </div>
+                <p className="text-xs text-red-700 mt-1">{doctorAssistance.message}</p>
+              </div>
+            )}
 
-                  <p className="text-xs opacity-50 mt-2">
-                    {new Date(message.created_at).toLocaleTimeString()}
+            {/* Info Banner */}
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 text-purple-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-purple-900 mb-1">RAG Active</p>
+                  <p className="text-xs text-purple-700 leading-relaxed">
+                    Translations are enhanced with cultural and medical context from the patient
+                    profile.
                   </p>
                 </div>
               </div>
-            );
-          })
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input */}
-      <form
-        onSubmit={handleSendMessage}
-        className="p-4 bg-white border-t-2 border-gray-200 rounded-b-xl"
-      >
-        {error && <div className="mb-2 text-sm text-red-600 bg-red-50 p-2 rounded">{error}</div>}
-
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder={`Type in ${getLanguageLabel(myLanguage)}...`}
-            className="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-blue-600 focus:outline-none"
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            disabled={loading || !newMessage.trim()}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Sending...' : 'Send'}
-          </button>
+            </div>
+          </div>
         </div>
-
-        <p className="text-xs text-gray-500 mt-2">
-          💡 Your message will be automatically translated to {getLanguageLabel(otherLanguage)}
-        </p>
-      </form>
+      )}
     </div>
   );
 }
