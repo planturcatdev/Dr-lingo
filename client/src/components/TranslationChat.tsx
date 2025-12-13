@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { Mic, Stop, VolumeUp, Psychology, Info, Refresh } from '@mui/icons-material';
 import ChatService, { ChatRoom, ChatMessage } from '../api/services/ChatService';
 import PatientContextManager from './PatientContextManager';
-import Description from '@mui/icons-material/Description';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -97,11 +96,15 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
   const [audioPreviewURL, setAudioPreviewURL] = useState<string | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState<number>(0);
   const [doctorAssistance, setDoctorAssistance] = useState<any>(null);
   const [loadingAssistance, setLoadingAssistance] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingStartTimeRef = useRef<number>(0);
 
   useEffect(() => {
     loadChatRoom();
@@ -156,7 +159,82 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
     }
   };
 
-  // Speech-to-Text Recognition
+  // Audio Recording (for non-English languages)
+  const startAudioRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+      audioChunksRef.current = [];
+      recordingStartTimeRef.current = Date.now();
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const recordingDuration = Date.now() - recordingStartTimeRef.current;
+
+        // Check minimum recording duration (1 second)
+        if (recordingDuration < 1000) {
+          setError('Recording too short. Please speak for at least 1 second.');
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+
+        console.log('Audio blob size:', audioBlob.size, 'bytes');
+
+        // Check if audio blob is too small (likely empty) - reduced threshold
+        if (audioBlob.size < 500) {
+          setError('No audio detected. Please check your microphone and try again.');
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        setRecordedAudio(audioBlob);
+        setAudioPreviewURL(URL.createObjectURL(audioBlob));
+
+        // Stop all tracks to release microphone
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingDuration(0);
+      setError(null);
+
+      // Update recording duration every 100ms
+      const durationInterval = setInterval(() => {
+        setRecordingDuration(Date.now() - recordingStartTimeRef.current);
+      }, 100);
+
+      // Store interval ID for cleanup
+      (mediaRecorder as any).durationInterval = durationInterval;
+    } catch (err) {
+      console.error('Failed to start audio recording:', err);
+      setError('Microphone access denied or not available');
+    }
+  };
+
+  const stopAudioRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      // Clear duration interval
+      const durationInterval = (mediaRecorderRef.current as any).durationInterval;
+      if (durationInterval) {
+        clearInterval(durationInterval);
+      }
+
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  // Speech-to-Text Recognition (for English only)
   const startSpeechRecognition = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -169,6 +247,7 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
     recognition.onresult = (event: any) => {
       let interim = '';
@@ -212,9 +291,19 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
 
   const handleToggleRecording = () => {
     if (isRecording) {
-      stopSpeechRecognition();
+      // Stop recording based on language
+      if (myLanguage === 'en') {
+        stopSpeechRecognition();
+      } else {
+        stopAudioRecording();
+      }
     } else {
-      startSpeechRecognition();
+      // Start recording based on language
+      if (myLanguage === 'en') {
+        startSpeechRecognition();
+      } else {
+        startAudioRecording();
+      }
     }
   };
 
@@ -239,18 +328,26 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
         text: newMessage || '[Voice Message]',
       };
 
-      // Add audio if recorded
+      // Add audio if recorded (for non-English languages)
       if (recordedAudio) {
+        console.log('Converting audio blob to base64, size:', recordedAudio.size);
         const base64Audio = await ChatService.audioBlobToBase64(recordedAudio);
         messageData.audio = base64Audio;
+        console.log('Base64 audio length:', base64Audio.length);
       }
+
+      console.log('Sending message with data:', {
+        ...messageData,
+        audio: messageData.audio ? `[${messageData.audio.length} chars]` : undefined,
+      });
 
       await ChatService.sendMessage(roomId, messageData);
       setNewMessage('');
       handleClearAudio();
       await loadMessages();
-    } catch (err) {
-      setError('Failed to send message');
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to send message';
+      setError(errorMsg);
       console.error(err);
     } finally {
       setLoading(false);
@@ -343,6 +440,19 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
             </div>
           )}
 
+          {/* Recording Indicator */}
+          {isRecording && myLanguage !== 'en' && (
+            <div className="mb-3 p-3 bg-red-50 rounded-lg border border-red-200 animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium text-red-700">
+                  Recording... {(recordingDuration / 1000).toFixed(1)}s
+                </span>
+                <span className="text-xs text-red-600">(Speak clearly for at least 1 second)</span>
+              </div>
+            </div>
+          )}
+
           {/* Audio Preview */}
           {audioPreviewURL && (
             <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -370,7 +480,7 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
               disabled={loading}
             />
 
-            {/* Speech-to-Text Button */}
+            {/* Speech-to-Text / Audio Recording Button */}
             <button
               type="button"
               onClick={handleToggleRecording}
@@ -379,7 +489,15 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
                   ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
                   : 'bg-purple-600 hover:bg-purple-700 text-white'
               }`}
-              title={isRecording ? 'Stop recording speech' : 'Start speech-to-text'}
+              title={
+                isRecording
+                  ? myLanguage === 'en'
+                    ? 'Stop speech recognition'
+                    : 'Stop audio recording'
+                  : myLanguage === 'en'
+                    ? 'Start speech-to-text'
+                    : 'Record audio for AI transcription'
+              }
             >
               {isRecording ? <Stop className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
@@ -398,7 +516,9 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
               Messages are automatically translated to {getLanguageLabel(otherLanguage)}
             </p>
             <p className="text-xs text-gray-500">
-              Click <Mic className="w-3 h-3 inline" /> for speech-to-text
+              {myLanguage === 'en'
+                ? 'Click microphone for speech-to-text'
+                : 'Click microphone to record audio'}
             </p>
           </div>
         </form>

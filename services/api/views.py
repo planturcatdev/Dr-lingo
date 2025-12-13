@@ -75,10 +75,11 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
         image_data = request.data.get("image")
         audio_data = request.data.get("audio")
 
-        if not sender_type or (not text and not audio_data):
-            return Response(
-                {"error": "sender_type and either text or audio are required"}, status=status.HTTP_400_BAD_REQUEST
-            )
+        if not sender_type:
+            return Response({"error": "sender_type is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not text and not audio_data:
+            return Response({"error": "Either text or audio is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Determine languages
         if sender_type == "patient":
@@ -170,6 +171,16 @@ Provide relevant cultural context, medical information, or language nuances that
 
                 # Decode base64 audio
                 audio_bytes = base64.b64decode(audio_data)
+                logger.info(f"Received audio: {len(audio_bytes)} bytes")
+
+                # Check if audio is too small (likely empty) - reduced threshold for webm
+                if len(audio_bytes) < 500:
+                    message.delete()
+                    logger.warning(f"Audio too small: {len(audio_bytes)} bytes")
+                    return Response(
+                        {"error": "Audio recording is too short or empty. Please record again."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
                 # Save audio file
                 audio_file = ContentFile(audio_bytes, name=f"audio_{message.id}.webm")
@@ -185,6 +196,14 @@ Provide relevant cultural context, medical information, or language nuances that
                         if transcription_result["success"]:
                             transcription = transcription_result["transcription"]
                             #  detected_lang = transcription_result["detected_language"]
+
+                            # Check if transcription is empty
+                            if not transcription or len(transcription.strip()) == 0:
+                                message.delete()
+                                return Response(
+                                    {"error": "No speech detected in audio. Please speak clearly and try again."},
+                                    status=status.HTTP_400_BAD_REQUEST,
+                                )
 
                             # Update message with transcription
                             message.audio_transcription = transcription
@@ -204,20 +223,28 @@ Provide relevant cultural context, medical information, or language nuances that
 
                             logger.info(f"Audio transcribed and translated: {transcription[:50]}...")
                         else:
-                            message.audio_transcription = (
-                                f"Transcription failed: {transcription_result.get('error', 'Unknown error')}"
+                            error_msg = transcription_result.get("error", "Unknown error")
+                            message.delete()
+                            logger.error(f"Audio transcription failed: {error_msg}")
+                            return Response(
+                                {"error": f"Audio transcription failed: {error_msg}"},
+                                status=status.HTTP_400_BAD_REQUEST,
                             )
-                            message.save()
-                            logger.error(f"Audio transcription failed: {transcription_result.get('error')}")
 
                     except Exception as e:
-                        message.audio_transcription = f"Transcription error: {str(e)}"
-                        message.save()
+                        message.delete()
                         logger.error(f"Audio transcription exception: {e}")
+                        return Response(
+                            {"error": f"Audio transcription error: {str(e)}"},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        )
 
             except Exception as e:
                 logger.error(f"Audio processing failed: {e}")
-                # Audio processing failed, but message is still saved
+                message.delete()
+                return Response(
+                    {"error": f"Audio processing failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         # Process image if provided
         if image_data:

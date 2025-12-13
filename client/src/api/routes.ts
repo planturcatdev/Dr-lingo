@@ -4,6 +4,7 @@
  */
 
 const routes = {
+  CHAT: '/chat',
   ITEMS: '/items/',
   HEALTH_CHECK: '/health/',
 };

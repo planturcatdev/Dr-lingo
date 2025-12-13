@@ -8,11 +8,14 @@ This service handles:
 - Multimodal content processing
 """
 
+import logging
 import os
 from typing import Any, Dict
 
 import google.generativeai as genai
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiTranslationService:
@@ -112,38 +115,48 @@ class GeminiTranslationService:
         Returns:
             Dictionary with transcription and detected language
         """
-        prompt = f"""
-        Transcribe this audio recording accurately.
+        # Check if audio data is too small (likely empty/silent)
+        if len(audio_data) < 500:  # Less than 500 bytes is likely empty
+            return {
+                "transcription": "",
+                "detected_language": source_lang if source_lang != "auto" else "unknown",
+                "success": False,
+                "error": "Audio file is too small or empty",
+            }
 
-        {"Detect the language automatically." if source_lang == "auto" else f"The audio is in {source_lang}."}
+        prompt = f"""Listen to this audio file and transcribe EXACTLY what is being said.
 
-        Provide:
-        1. The exact transcription
-        2. The detected language code (e.g., 'en', 'es', 'fr')
+CRITICAL INSTRUCTIONS:
+- If there is NO speech or the audio is silent/empty, respond with: "EMPTY_AUDIO"
+- If there IS speech, transcribe it word-for-word
+- Do NOT make up or generate content
+- Do NOT provide example transcriptions
+- Only transcribe what you actually hear
 
-        Format your response as:
-        LANGUAGE: [language_code]
-        TRANSCRIPTION: [transcribed text]
-        """
+{"Language: Detect automatically" if source_lang == "auto" else f"Expected language: {source_lang}"}
+
+Respond in this format:
+LANGUAGE: [2-letter code like 'en', 'es', 'ar', etc. or 'none' if empty]
+TRANSCRIPTION: [exact words spoken, or "EMPTY_AUDIO" if silent]
+"""
 
         try:
-            # Upload audio file to Gemini
-            import tempfile
+            # Create audio part for Gemini
+            import base64
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
-                temp_audio.write(audio_data)
-                temp_audio_path = temp_audio.name
+            # Encode audio as base64
+            audio_b64 = base64.b64encode(audio_data).decode("utf-8")
 
-            # Upload file
-            audio_file = genai.upload_file(temp_audio_path)
+            # Create the audio part with inline data
+            audio_part = {"mime_type": "audio/webm", "data": audio_b64}
 
-            # Generate transcription
-            response = self.model.generate_content([prompt, audio_file])
+            # Generate transcription with audio inline
+            response = self.model.generate_content([prompt, audio_part])
             result_text = response.text.strip()
 
             # Parse response
             lines = result_text.split("\n")
-            detected_lang = "unknown"
+            detected_lang = source_lang if source_lang != "auto" else "unknown"
             transcription = ""
 
             for line in lines:
@@ -156,14 +169,22 @@ class GeminiTranslationService:
             if not transcription:
                 transcription = result_text
 
-            # Clean up temp file
-            import os
-
-            os.unlink(temp_audio_path)
+            # Check if audio was empty
+            if transcription == "EMPTY_AUDIO" or detected_lang == "none":
+                return {
+                    "transcription": "",
+                    "detected_language": source_lang if source_lang != "auto" else "unknown",
+                    "success": False,
+                    "error": "No speech detected in audio",
+                }
 
             return {"transcription": transcription, "detected_language": detected_lang, "success": True}
 
         except Exception as e:
+            import traceback
+
+            error_details = traceback.format_exc()
+            logger.error(f"Audio transcription error: {error_details}")
             return {"transcription": "", "detected_language": "unknown", "success": False, "error": str(e)}
 
     def translate_with_context(

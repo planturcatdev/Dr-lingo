@@ -71,6 +71,7 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
     { code: 'zulu', name: 'Zulu' },
     { code: 'tsawana', name: 'Tswana' },
     { code: 'xhosa', name: 'Xhosa' },
+    { code: 'chichewe', name: 'Chichewe' },
   ];
 
   if (loading) {
