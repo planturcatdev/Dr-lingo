@@ -1,42 +1,25 @@
-import axios from 'axios';
+import httpClient from '../HttpClient';
+import { API_BASE_URL } from '../routes';
+import type {
+  Collection,
+  CollectionItem,
+  CreateCollectionData,
+  CreateCollectionItemData,
+  RAGQueryRequest,
+  RAGQueryResponse,
+} from '../../types';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+// Re-export types for backward compatibility
+export type { Collection, CollectionItem, CreateCollectionData, CreateCollectionItemData };
 
-export interface Collection {
-  id: number;
-  name: string;
-  description: string;
-  embedding_provider: string;
-  embedding_model: string;
-  embedding_dimensions: number;
-  completion_model: string;
-  chunking_strategy: string;
-  chunk_length: number | null;
-  chunk_overlap: number | null;
-  created_at: string;
-  updated_at: string;
-  items_count: number;
-}
-
-export interface CollectionItem {
-  id: number;
-  name: string;
-  description: string;
-  collection: number;
-  collection_name: string;
-  content: string;
-  metadata: any;
-  created_at: string;
-  updated_at: string;
-}
-
+// Legacy interfaces for backward compatibility
 export interface QueryResult {
   query: string;
   results: Array<{
     name: string;
     content: string;
     similarity: number;
-    metadata: any;
+    metadata: Record<string, any>;
   }>;
 }
 
@@ -50,57 +33,81 @@ export interface RAGAnswer {
   }>;
 }
 
-class RAGService {
+const RAGService = {
   async getCollections(): Promise<Collection[]> {
-    const response = await axios.get(`${API_URL}/collections/`);
+    const response = await httpClient.get(`${API_BASE_URL}/collections/`);
     return response.data.results || response.data;
-  }
+  },
 
   async getCollection(id: number): Promise<Collection> {
-    const response = await axios.get(`${API_URL}/collections/${id}/`);
+    const response = await httpClient.get(`${API_BASE_URL}/collections/${id}/`);
     return response.data;
-  }
+  },
 
-  async createCollection(data: Partial<Collection>): Promise<Collection> {
-    const response = await axios.post(`${API_URL}/collections/`, data);
+  async createCollection(data: CreateCollectionData): Promise<Collection> {
+    const response = await httpClient.post(`${API_BASE_URL}/collections/`, data);
     return response.data;
-  }
+  },
+
+  async updateCollection(id: number, data: Partial<CreateCollectionData>): Promise<Collection> {
+    const response = await httpClient.patch(`${API_BASE_URL}/collections/${id}/`, data);
+    return response.data;
+  },
+
+  async deleteCollection(id: number): Promise<void> {
+    await httpClient.delete(`${API_BASE_URL}/collections/${id}/`);
+  },
 
   async addDocument(
     collectionId: number,
-    data: { name: string; content: string; description?: string; metadata?: any }
+    data: { name: string; content: string; description?: string; metadata?: Record<string, any> }
   ): Promise<CollectionItem> {
-    const response = await axios.post(`${API_URL}/collections/${collectionId}/add_document/`, data);
+    const response = await httpClient.post(
+      `${API_BASE_URL}/collections/${collectionId}/add_document/`,
+      data
+    );
     return response.data;
-  }
+  },
 
   async queryCollection(
     collectionId: number,
     query: string,
     topK: number = 5
   ): Promise<QueryResult> {
-    const response = await axios.post(`${API_URL}/collections/${collectionId}/query/`, {
+    const response = await httpClient.post(`${API_BASE_URL}/collections/${collectionId}/query/`, {
       query,
       top_k: topK,
     });
     return response.data;
-  }
+  },
 
   async queryAndAnswer(collectionId: number, query: string, topK: number = 5): Promise<RAGAnswer> {
-    const response = await axios.post(`${API_URL}/collections/${collectionId}/query_and_answer/`, {
-      query,
-      top_k: topK,
-    });
+    const response = await httpClient.post(
+      `${API_BASE_URL}/collections/${collectionId}/query_and_answer/`,
+      {
+        query,
+        top_k: topK,
+      }
+    );
     return response.data;
-  }
+  },
 
   async getCollectionItems(collectionId?: number): Promise<CollectionItem[]> {
     const url = collectionId
-      ? `${API_URL}/collection-items/?collection=${collectionId}`
-      : `${API_URL}/collection-items/`;
-    const response = await axios.get(url);
+      ? `${API_BASE_URL}/collection-items/?collection=${collectionId}`
+      : `${API_BASE_URL}/collection-items/`;
+    const response = await httpClient.get(url);
     return response.data.results || response.data;
-  }
-}
+  },
 
-export default new RAGService();
+  async createCollectionItem(data: CreateCollectionItemData): Promise<CollectionItem> {
+    const response = await httpClient.post(`${API_BASE_URL}/collection-items/`, data);
+    return response.data;
+  },
+
+  async deleteCollectionItem(id: number): Promise<void> {
+    await httpClient.delete(`${API_BASE_URL}/collection-items/${id}/`);
+  },
+};
+
+export default RAGService;

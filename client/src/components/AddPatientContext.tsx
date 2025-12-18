@@ -101,7 +101,7 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
             embedding_provider: 'gemini',
             embedding_model: 'text-embedding-004',
             embedding_dimensions: 768,
-            completion_model: 'gemini-2.0-flash-exp',
+            completion_model: 'h-exp',
             chunking_strategy: 'fixed-length',
             chunk_length: 1000,
             chunk_overlap: 200,

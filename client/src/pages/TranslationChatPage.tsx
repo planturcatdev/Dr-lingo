@@ -1,15 +1,27 @@
 import { useState } from 'react';
 import ChatRoomList from '../components/ChatRoomList';
 import TranslationChat from '../components/TranslationChat';
+import { useAuth } from '../contexts/AuthContext';
 
 function TranslationChatPage() {
+  const { user } = useAuth();
   const [selectedRoom, setSelectedRoom] = useState<{
     roomId: number;
     userType: 'patient' | 'doctor';
   } | null>(null);
 
+  // Determine user type from auth context, default to patient
+  const getUserType = (): 'patient' | 'doctor' => {
+    if (user?.role === 'doctor' || user?.role === 'admin') {
+      return 'doctor';
+    }
+    return 'patient';
+  };
+
   const handleSelectRoom = (roomId: number, userType: 'patient' | 'doctor') => {
-    setSelectedRoom({ roomId, userType });
+    // Use the authenticated user's role if available
+    const actualUserType = user ? getUserType() : userType;
+    setSelectedRoom({ roomId, userType: actualUserType });
   };
 
   const handleBackToList = () => {
@@ -21,9 +33,7 @@ function TranslationChatPage() {
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Patient-Doctor Translation Chat</h1>
-          <p className="text-gray-600">
-            Real-time translation powered by Gemini AI • Break language barriers in healthcare
-          </p>
+          <p className="text-gray-600">Break language barriers in healthcare</p>
         </div>
 
         {selectedRoom ? (
@@ -57,8 +67,8 @@ function TranslationChatPage() {
               <li className="flex items-start gap-2">
                 <span className="text-black font-bold">•</span>
                 <span>
-                  <strong>Context-Aware:</strong> Gemini AI considers conversation history for
-                  accurate medical terminology
+                  <strong>Context-Aware:</strong> AI considers conversation history for accurate
+                  medical terminology
                 </span>
               </li>
               <li className="flex items-start gap-2">

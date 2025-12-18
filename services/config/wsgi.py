@@ -1,5 +1,5 @@
 """
-WSGI config for hackathon project.
+WSGI config for dr-lingo project.
 """
 
 import os
