@@ -34,6 +34,8 @@ huggingface-hub = "^0.25.0"
 django-otp = "^1.5.0"
 django-two-factor-auth = {extras = ["email"], version = "^1.16.0"}
 qrcode = "^7.4.2"
+tts = {version = ">=0.22.0", python = ">=3.11,<3.12"}
+torchcodec = "^0.9.1"
 
 
 [tool.poetry.group.dev.dependencies]

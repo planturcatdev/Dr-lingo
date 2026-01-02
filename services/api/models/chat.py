@@ -58,6 +58,9 @@ class ChatMessage(models.Model):
     audio_file = models.FileField(upload_to="chat_audio/", null=True, blank=True)
     audio_duration = models.FloatField(null=True, blank=True, help_text="Duration in seconds")
     audio_transcription = models.TextField(blank=True, help_text="Transcribed text from audio")
+    tts_audio = models.FileField(
+        upload_to="tts_audio/", null=True, blank=True, help_text="Generated TTS audio for translation"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property
@@ -65,6 +68,13 @@ class ChatMessage(models.Model):
         """Return full URL for audio file."""
         if self.audio_file:
             return self.audio_file.url
+        return None
+
+    @property
+    def tts_audio_url(self):
+        """Return full URL for TTS audio file."""
+        if self.tts_audio:
+            return self.tts_audio.url
         return None
 
     class Meta:

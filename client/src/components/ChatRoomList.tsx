@@ -30,7 +30,6 @@ function ChatRoomList({ onSelectRoom }: ChatRoomListProps) {
   const canViewContext = user?.role === 'doctor' || user?.role === 'admin' || user?.is_superuser;
   const { showError, showSuccess } = useToast();
 
-
   const languages = SUPPORTED_LANGUAGES;
 
   const toggleRoomExpanded = (roomId: number) => {

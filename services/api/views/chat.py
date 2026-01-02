@@ -44,6 +44,7 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
         Send a message in a chat room with automatic translation.
 
         POST /api/chat-rooms/{id}/send_message/
+
         """
         room = self.get_object()
         sender_type = request.data.get("sender_type")
@@ -65,36 +66,13 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
             original_lang = room.doctor_language
             target_lang = room.patient_language
 
-        # Get conversation history for context
-        recent_messages = room.messages.order_by("-created_at")[:5]
-        history = [
-            {"sender_type": msg.sender_type, "text": msg.original_text} for msg in reversed(list(recent_messages))
-        ]
-
-        # Query RAG for relevant context
-        rag_context = self._get_rag_context(room, history, text, sender_type)
-
-        # Translate message with RAG context using AI factory
-        try:
-            translator = get_translation_service()
-            translated_text = translator.translate_with_context(
-                text=text,
-                source_lang=original_lang,
-                target_lang=target_lang,
-                conversation_history=history,
-                sender_type=sender_type,
-                rag_context=rag_context,
-            )
-        except Exception as e:
-            return Response({"error": f"Translation failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # Create message
+        # Create message immediately with placeholder translation
         message = ChatMessage.objects.create(
             room=room,
             sender_type=sender_type,
-            original_text=text,
+            original_text=text or "[Voice Message]",
             original_language=original_lang,
-            translated_text=translated_text,
+            translated_text="[Translating...]",
             translated_language=target_lang,
             has_image=bool(image_data),
             has_audio=bool(audio_data),
@@ -110,18 +88,38 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
                     "message_id": message.id,
                     "room_id": room.id,
                     "sender_type": sender_type,
-                    "text": text[:100],  # Truncate for event
+                    "text": text[:100] if text else "[Voice Message]",
                     "has_audio": bool(audio_data),
                 },
             )
         except Exception as e:
             logger.warning(f"Failed to publish message.created event: {e}")
 
-        # Process audio if provided
+        # Process audio if provided (async via Celery)
         if audio_data:
-            result = self._process_audio(message, audio_data, original_lang, target_lang, history, rag_context)
+            result = self._process_audio(message, audio_data, original_lang, target_lang, [], None)
             if result is not None:
                 return result
+        elif text and CELERY_ENABLED:
+            # Queue async translation for text messages
+            try:
+                from api.tasks.translation_tasks import translate_text_async
+
+                translate_text_async.delay(
+                    message_id=message.id,
+                    text=text,
+                    source_lang=original_lang,
+                    target_lang=target_lang,
+                    use_rag=room.rag_collection is not None,
+                )
+                logger.info(f"Translation queued for message {message.id}")
+            except Exception as e:
+                logger.warning(f"Celery task failed, falling back to sync: {e}")
+                # Fall through to synchronous translation
+                self._translate_sync(message, text, original_lang, target_lang, room)
+        elif text:
+            # Synchronous translation (fallback when Celery not available)
+            self._translate_sync(message, text, original_lang, target_lang, room)
 
         # Process image if provided
         if image_data:
@@ -129,6 +127,34 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
 
         serializer = ChatMessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _translate_sync(self, message, text, original_lang, target_lang, room):
+        """Synchronous translation fallback."""
+        try:
+            # Get conversation history for context
+            recent_messages = room.messages.exclude(id=message.id).order_by("-created_at")[:5]
+            history = [
+                {"sender_type": msg.sender_type, "text": msg.original_text} for msg in reversed(list(recent_messages))
+            ]
+
+            # Query RAG for relevant context
+            rag_context = self._get_rag_context(room, history, text, message.sender_type)
+
+            translator = get_translation_service()
+            translated_text = translator.translate_with_context(
+                text=text,
+                source_lang=original_lang,
+                target_lang=target_lang,
+                conversation_history=history,
+                sender_type=message.sender_type,
+                rag_context=rag_context,
+            )
+            message.translated_text = translated_text
+            message.save()
+        except Exception as e:
+            logger.error(f"Sync translation failed: {e}")
+            message.translated_text = f"[Translation failed: {str(e)}]"
+            message.save()
 
     def _get_rag_context(self, room, history, text, sender_type):
         """Get RAG context for translation."""

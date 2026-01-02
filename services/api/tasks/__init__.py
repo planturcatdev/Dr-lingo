@@ -11,6 +11,7 @@ from .cleanup_tasks import cleanup_expired_cache, cleanup_old_audio_files
 from .dataset_tasks import import_all_hf_languages, import_hf_dataset_async
 from .rag_tasks import generate_embeddings_async, process_document_async
 from .translation_tasks import translate_text_async
+from .tts_tasks import generate_tts_async
 
 logger = logging.getLogger(__name__)
 
@@ -68,4 +69,5 @@ __all__ = [
     "cleanup_expired_cache",
     "import_hf_dataset_async",
     "import_all_hf_languages",
+    "generate_tts_async",
 ]

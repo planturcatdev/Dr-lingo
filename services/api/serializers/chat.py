@@ -7,6 +7,7 @@ class ChatMessageSerializer(serializers.ModelSerializer):
     """Serializer for ChatMessage model with translation support."""
 
     audio_url = serializers.SerializerMethodField()
+    tts_audio_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatMessage
@@ -25,6 +26,7 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "audio_url",
             "audio_duration",
             "audio_transcription",
+            "tts_audio_url",
             "created_at",
         ]
         read_only_fields = [
@@ -35,6 +37,7 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "image_description",
             "audio_url",
             "audio_transcription",
+            "tts_audio_url",
         ]
 
     def get_audio_url(self, obj):
@@ -43,6 +46,14 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             if request:
                 return request.build_absolute_uri(obj.audio_file.url)
             return obj.audio_file.url
+        return None
+
+    def get_tts_audio_url(self, obj):
+        if obj.tts_audio:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.tts_audio.url)
+            return obj.tts_audio.url
         return None
 
 

@@ -4,7 +4,7 @@ import AuthPage from './pages/AuthPage';
 import AdminPage from './pages/AdminPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
-import { UserMenu } from './components/auth';
+import { UserMenu, ProtectedRoute } from './components/auth';
 import { AdminPanelSettings } from '@mui/icons-material';
 
 // Home page component
@@ -129,8 +129,22 @@ function AppContent() {
               )
             }
           />
-          <Route path="/translation-chat" element={<TranslationChatPage />} />
-          <Route path="/admin" element={<AdminPage />} />
+          <Route
+            path="/translation-chat"
+            element={
+              <ProtectedRoute>
+                <TranslationChatPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requiredRole="admin">
+                <AdminPage />
+              </ProtectedRoute>
+            }
+          />
         </Routes>
       </main>
     </div>
