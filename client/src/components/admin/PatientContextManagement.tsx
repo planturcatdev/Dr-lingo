@@ -22,6 +22,7 @@ import type {
 } from '../../types/collection';
 import type { ChatRoom } from '../../types/chat';
 import { useToast } from '../../contexts/ToastContext';
+import { useAIConfig } from '../../hooks/useAIConfig';
 
 export default function PatientContextManagement() {
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -395,6 +396,7 @@ function PatientContextModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { config: aiConfig } = useAIConfig();
   const [formData, setFormData] = useState<CreateCollectionData>({
     name: collection?.name || '',
     description: collection?.description || '',
@@ -402,15 +404,31 @@ function PatientContextModal({
     is_global: false,
     chat_room: collection?.chat_room || undefined,
     knowledge_bases: collection?.knowledge_bases || [],
-    embedding_provider: collection?.embedding_provider || 'gemini',
-    embedding_model: collection?.embedding_model || 'text-embedding-004',
-    embedding_dimensions: collection?.embedding_dimensions || 768,
+    embedding_provider: collection?.embedding_provider || aiConfig.embedding_provider,
+    embedding_model: collection?.embedding_model || aiConfig.embedding_model,
+    embedding_dimensions: collection?.embedding_dimensions || aiConfig.embedding_dimensions,
+    completion_model: collection?.completion_model || aiConfig.completion_model,
     chunking_strategy: collection?.chunking_strategy || 'no-chunking',
-    chunk_length: collection?.chunk_length || 1000,
-    chunk_overlap: collection?.chunk_overlap || 200,
+    chunk_length: collection?.chunk_length || aiConfig.chunk_length,
+    chunk_overlap: collection?.chunk_overlap || aiConfig.chunk_overlap,
   });
   const [loading, setLoading] = useState(false);
   const { showError, showSuccess } = useToast();
+
+  // Update form when AI config loads
+  useEffect(() => {
+    if (!collection) {
+      setFormData((prev) => ({
+        ...prev,
+        embedding_provider: aiConfig.embedding_provider,
+        embedding_model: aiConfig.embedding_model,
+        embedding_dimensions: aiConfig.embedding_dimensions,
+        completion_model: aiConfig.completion_model,
+        chunk_length: aiConfig.chunk_length,
+        chunk_overlap: aiConfig.chunk_overlap,
+      }));
+    }
+  }, [aiConfig, collection]);
 
   const handleKnowledgeBaseToggle = (kbId: number) => {
     const current = formData.knowledge_bases || [];
@@ -495,6 +513,20 @@ function PatientContextModal({
             </select>
             <p className="text-xs text-gray-500 mt-1">
               Link to a chat room for personalized translations in that conversation
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Completion Model</label>
+            <input
+              type="text"
+              placeholder="e.g., granite3.3:8b"
+              value={formData.completion_model || 'granite3.3:8b'}
+              onChange={(e) => setFormData({ ...formData, completion_model: e.target.value })}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:border-black focus:ring-1 focus:ring-black outline-none"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Model used to generate answers from this context (default: granite3.3:8b)
             </p>
           </div>
 

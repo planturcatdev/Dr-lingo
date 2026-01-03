@@ -12,10 +12,37 @@ interface MessageBubbleProps {
 
 function MessageBubble({ message, isMyMessage, getLanguageLabel }: MessageBubbleProps) {
   const [showOriginal, setShowOriginal] = useState(false);
+  const [isPlayingTTS, setIsPlayingTTS] = useState(false);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Check if translation is still in progress
+  const isTranslating =
+    message.translated_text === '[Translating...]' ||
+    message.translated_text === '[Processing...]' ||
+    message.original_text === '[Processing audio...]';
 
   // Determine what to display
   const displayText = showOriginal ? message.original_text : message.translated_text;
   const displayLang = showOriginal ? message.original_language : message.translated_language;
+
+  // Handle TTS playback
+  const handlePlayTTS = () => {
+    if (!message.tts_audio_url) return;
+
+    if (isPlayingTTS && ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current.currentTime = 0;
+      setIsPlayingTTS(false);
+    } else {
+      if (!ttsAudioRef.current) {
+        ttsAudioRef.current = new Audio(message.tts_audio_url);
+        ttsAudioRef.current.onended = () => setIsPlayingTTS(false);
+        ttsAudioRef.current.onerror = () => setIsPlayingTTS(false);
+      }
+      ttsAudioRef.current.play();
+      setIsPlayingTTS(true);
+    }
+  };
 
   return (
     <div className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
@@ -24,8 +51,8 @@ function MessageBubble({ message, isMyMessage, getLanguageLabel }: MessageBubble
           isMyMessage ? 'bg-black text-white' : 'bg-white border border-gray-200 text-gray-900'
         }`}
       >
-        {/* Toggle Button - Shows on hover */}
-        {message.translated_text && (
+        {/* Toggle Button - Shows on hover (only when translation is ready) */}
+        {message.translated_text && !isTranslating && (
           <button
             onClick={() => setShowOriginal(!showOriginal)}
             className={`absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded text-xs font-medium ${
@@ -49,6 +76,30 @@ function MessageBubble({ message, isMyMessage, getLanguageLabel }: MessageBubble
           <span className={`text-xs ${isMyMessage ? 'text-gray-400' : 'text-gray-500'}`}>
             {new Date(message.created_at).toLocaleTimeString()}
           </span>
+          {/* Translating indicator */}
+          {isTranslating && (
+            <span
+              className={`text-xs flex items-center gap-1 ${isMyMessage ? 'text-blue-300' : 'text-blue-500'}`}
+            >
+              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  fill="none"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+              Translating...
+            </span>
+          )}
         </div>
 
         {/* Audio playback */}
@@ -63,11 +114,34 @@ function MessageBubble({ message, isMyMessage, getLanguageLabel }: MessageBubble
 
         {/* Message text - Shows translation by default, original on toggle */}
         <div>
-          <p className="text-base leading-relaxed">{displayText || message.original_text}</p>
-          <p className={`text-xs mt-1 ${isMyMessage ? 'text-gray-400' : 'text-gray-500'}`}>
-            {showOriginal ? 'Original' : 'Translation'}: {getLanguageLabel(displayLang)}
+          <p className="text-base leading-relaxed">
+            {isTranslating ? message.original_text : displayText || message.original_text}
           </p>
+          {!isTranslating && (
+            <p className={`text-xs mt-1 ${isMyMessage ? 'text-gray-400' : 'text-gray-500'}`}>
+              {showOriginal ? 'Original' : 'Translation'}: {getLanguageLabel(displayLang)}
+            </p>
+          )}
         </div>
+
+        {/* TTS Play Button - Shows when translation is ready and TTS audio exists */}
+        {!isTranslating && message.tts_audio_url && (
+          <button
+            onClick={handlePlayTTS}
+            className={`mt-3 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+              isMyMessage
+                ? isPlayingTTS
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                : isPlayingTTS
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+            }`}
+          >
+            <VolumeUp className="w-4 h-4" />
+            {isPlayingTTS ? 'Stop' : 'Listen'}
+          </button>
+        )}
 
         {/* Image description */}
         {message.image_description && (
@@ -110,9 +184,17 @@ function TranslationChat({ roomId, userType }: TranslationChatProps) {
   useEffect(() => {
     loadChatRoom();
     loadMessages();
-    const interval = setInterval(loadMessages, 3000);
+    // Poll faster (1s) when there are messages being translated, otherwise 3s
+    const hasPendingTranslations = messages.some(
+      (m) =>
+        m.translated_text === '[Translating...]' ||
+        m.translated_text === '[Processing...]' ||
+        m.original_text === '[Processing audio...]'
+    );
+    const pollInterval = hasPendingTranslations ? 1000 : 3000;
+    const interval = setInterval(loadMessages, pollInterval);
     return () => clearInterval(interval);
-  }, [roomId]);
+  }, [roomId, messages]);
 
   useEffect(() => {
     // Cleanup audio URL on unmount or when it changes

@@ -44,6 +44,7 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
         Send a message in a chat room with automatic translation.
 
         POST /api/chat-rooms/{id}/send_message/
+
         """
         room = self.get_object()
         sender_type = request.data.get("sender_type")
@@ -65,36 +66,13 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
             original_lang = room.doctor_language
             target_lang = room.patient_language
 
-        # Get conversation history for context
-        recent_messages = room.messages.order_by("-created_at")[:5]
-        history = [
-            {"sender_type": msg.sender_type, "text": msg.original_text} for msg in reversed(list(recent_messages))
-        ]
-
-        # Query RAG for relevant context
-        rag_context = self._get_rag_context(room, history, text, sender_type)
-
-        # Translate message with RAG context using AI factory
-        try:
-            translator = get_translation_service()
-            translated_text = translator.translate_with_context(
-                text=text,
-                source_lang=original_lang,
-                target_lang=target_lang,
-                conversation_history=history,
-                sender_type=sender_type,
-                rag_context=rag_context,
-            )
-        except Exception as e:
-            return Response({"error": f"Translation failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # Create message
+        # Create message immediately with placeholder translation
         message = ChatMessage.objects.create(
             room=room,
             sender_type=sender_type,
-            original_text=text,
+            original_text=text or "[Voice Message]",
             original_language=original_lang,
-            translated_text=translated_text,
+            translated_text="[Translating...]",
             translated_language=target_lang,
             has_image=bool(image_data),
             has_audio=bool(audio_data),
@@ -110,18 +88,38 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
                     "message_id": message.id,
                     "room_id": room.id,
                     "sender_type": sender_type,
-                    "text": text[:100],  # Truncate for event
+                    "text": text[:100] if text else "[Voice Message]",
                     "has_audio": bool(audio_data),
                 },
             )
         except Exception as e:
             logger.warning(f"Failed to publish message.created event: {e}")
 
-        # Process audio if provided
+        # Process audio if provided (async via Celery)
         if audio_data:
-            result = self._process_audio(message, audio_data, original_lang, target_lang, history, rag_context)
+            result = self._process_audio(message, audio_data, original_lang, target_lang, [], None)
             if result is not None:
                 return result
+        elif text and CELERY_ENABLED:
+            # Queue async translation for text messages
+            try:
+                from api.tasks.translation_tasks import translate_text_async
+
+                translate_text_async.delay(
+                    message_id=message.id,
+                    text=text,
+                    source_lang=original_lang,
+                    target_lang=target_lang,
+                    use_rag=room.rag_collection is not None,
+                )
+                logger.info(f"Translation queued for message {message.id}")
+            except Exception as e:
+                logger.warning(f"Celery task failed, falling back to sync: {e}")
+                # Fall through to synchronous translation
+                self._translate_sync(message, text, original_lang, target_lang, room)
+        elif text:
+            # Synchronous translation (fallback when Celery not available)
+            self._translate_sync(message, text, original_lang, target_lang, room)
 
         # Process image if provided
         if image_data:
@@ -129,6 +127,34 @@ class ChatRoomViewSet(viewsets.ModelViewSet):
 
         serializer = ChatMessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _translate_sync(self, message, text, original_lang, target_lang, room):
+        """Synchronous translation fallback."""
+        try:
+            # Get conversation history for context
+            recent_messages = room.messages.exclude(id=message.id).order_by("-created_at")[:5]
+            history = [
+                {"sender_type": msg.sender_type, "text": msg.original_text} for msg in reversed(list(recent_messages))
+            ]
+
+            # Query RAG for relevant context
+            rag_context = self._get_rag_context(room, history, text, message.sender_type)
+
+            translator = get_translation_service()
+            translated_text = translator.translate_with_context(
+                text=text,
+                source_lang=original_lang,
+                target_lang=target_lang,
+                conversation_history=history,
+                sender_type=message.sender_type,
+                rag_context=rag_context,
+            )
+            message.translated_text = translated_text
+            message.save()
+        except Exception as e:
+            logger.error(f"Sync translation failed: {e}")
+            message.translated_text = f"[Translation failed: {str(e)}]"
+            message.save()
 
     def _get_rag_context(self, room, history, text, sender_type):
         """Get RAG context for translation."""
@@ -251,13 +277,19 @@ Provide relevant cultural context, medical information, or language nuances.
         """Process image data for a message."""
         try:
             image_bytes = base64.b64decode(image_data)
-            # Use Gemini for image analysis (Ollama doesn't support this well)
-            from api.services.gemini_service import get_gemini_service
+            # Use Gemini for image analysis (Ollama doesn't support this well yet)
+            try:
+                from api.services.gemini_service import get_gemini_service
 
-            gemini = get_gemini_service()
-            result = gemini.analyze_image(image_bytes, target_lang)
-            message.image_description = result.get("description")
-            message.save()
+                gemini = get_gemini_service()
+                result = gemini.analyze_image(image_bytes, target_lang)
+                message.image_description = result.get("description")
+                message.save()
+            except ValueError:
+                # Gemini not configured
+                logger.warning("Gemini not configured for image analysis")
+            except Exception as e:
+                logger.error(f"Image analysis failed: {e}")
         except Exception:
             pass
 
@@ -306,8 +338,23 @@ CHAT ROOM: {room.name}
 """
 
         try:
+            # Ensure the collection is marked as patient context for this room
+            if room.rag_collection:
+                updated = False
+                if room.rag_collection.collection_type != Collection.CollectionType.PATIENT_CONTEXT:
+                    room.rag_collection.collection_type = Collection.CollectionType.PATIENT_CONTEXT
+                    updated = True
+                if room.rag_collection.chat_room_id != room.id:
+                    room.rag_collection.chat_room_id = room.id
+                    updated = True
+                if room.rag_collection.is_global:
+                    room.rag_collection.is_global = False
+                    updated = True
+                if updated:
+                    room.rag_collection.save()
+
             rag_service = RAGService(room.rag_collection)
-            item = rag_service.add_document(
+            items = rag_service.add_document(
                 name=f"Patient Profile: {patient_name}",
                 content=document_content,
                 description=f"Comprehensive profile for {patient_name}",
@@ -323,7 +370,12 @@ CHAT ROOM: {room.name}
                 room.save()
 
             return Response(
-                {"status": "success", "message": "Patient context added", "document_id": item.id},
+                {
+                    "status": "success",
+                    "message": "Patient context added",
+                    "document_id": items[0].id if items else None,
+                    "parts_count": len(items),
+                },
                 status=status.HTTP_201_CREATED,
             )
 
@@ -395,6 +447,16 @@ Please suggest:
                     {"status": "success", "assistance": result["answer"], "sources": result.get("sources", [])},
                     status=status.HTTP_200_OK,
                 )
+            elif result.get("message") == "No relevant documents found":
+                # Don't treat empty results as server error
+                return Response(
+                    {
+                        "status": "success",
+                        "assistance": "I couldn't find enough relevant information in the knowledge base to provide specific assistance. Please try adding more documents to the collection.",
+                        "sources": [],
+                    },
+                    status=status.HTTP_200_OK,
+                )
             else:
                 return Response(
                     {"status": "error", "message": result.get("message", "Failed to generate assistance")},
@@ -402,7 +464,11 @@ Please suggest:
                 )
 
         except Exception as e:
-            return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error(f"Doctor assistance failed: {e}", exc_info=True)
+            return Response(
+                {"status": "error", "message": f"An unexpected error occurred: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class ChatMessageViewSet(viewsets.ReadOnlyModelViewSet):

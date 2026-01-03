@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Dashboard,
@@ -9,13 +10,14 @@ import {
   AdminPanelSettings,
   MenuBook,
   Person,
+  Terminal,
 } from '@mui/icons-material';
-import { Link } from 'react-router-dom';
 import AdminDashboard from '../components/admin/AdminDashboard';
 import UserManagement from '../components/admin/UserManagement';
 import ChatRoomManagement from '../components/admin/ChatRoomManagement';
 import KnowledgeBaseManagement from '../components/admin/KnowledgeBaseManagement';
 import PatientContextManagement from '../components/admin/PatientContextManagement';
+import TaskMonitor from '../components/admin/TaskMonitor';
 
 type AdminTab =
   | 'dashboard'
@@ -23,33 +25,25 @@ type AdminTab =
   | 'chatrooms'
   | 'knowledge-base'
   | 'patient-context'
+  | 'task-monitor'
   | 'settings';
 
 export default function AdminPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
 
-  // Check if user is admin
-  if (user?.role !== 'admin' && !user?.is_superuser) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center border border-gray-200">
-          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AdminPanelSettings className="w-8 h-8 text-gray-400" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-          <p className="text-gray-600 mb-6">You don't have permission to access the admin panel.</p>
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors font-semibold"
-          >
-            <ArrowBack className="w-4 h-4" />
-            Go Home
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as AdminTab;
+    if (tabParam && tabs.some((t) => t.id === tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (tabId: AdminTab) => {
+    setActiveTab(tabId);
+    setSearchParams({ tab: tabId });
+  };
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Dashboard },
@@ -57,6 +51,7 @@ export default function AdminPage() {
     { id: 'chatrooms', label: 'Chat Rooms', icon: Chat },
     { id: 'knowledge-base', label: 'Knowledge Base', icon: MenuBook },
     { id: 'patient-context', label: 'Patient Context', icon: Person },
+    { id: 'task-monitor', label: 'Task Monitor', icon: Terminal },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -72,6 +67,8 @@ export default function AdminPage() {
         return <KnowledgeBaseManagement />;
       case 'patient-context':
         return <PatientContextManagement />;
+      case 'task-monitor':
+        return <TaskMonitor />;
       case 'settings':
         return (
           <div className="bg-white rounded-xl border border-gray-200 p-8">
@@ -124,7 +121,7 @@ export default function AdminPage() {
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as AdminTab)}
+                onClick={() => handleTabChange(tab.id as AdminTab)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
                   activeTab === tab.id
                     ? 'bg-black text-white shadow-md'

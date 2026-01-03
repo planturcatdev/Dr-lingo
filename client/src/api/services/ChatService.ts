@@ -1,4 +1,5 @@
 import ApiClient from '../ApiClient';
+import routes from '../routes';
 import type {
   ChatRoom,
   ChatMessage,
@@ -23,7 +24,9 @@ export interface SendMessageRequest {
 const ChatService = {
   // Get all chat rooms
   getChatRooms: async (): Promise<ChatRoom[]> => {
-    const response = await ApiClient.get<PaginatedResponse<ChatRoom> | ChatRoom[]>('/chat-rooms/');
+    const response = await ApiClient.get<PaginatedResponse<ChatRoom> | ChatRoom[]>(
+      routes.CHAT_ROOMS
+    );
     // Handle paginated response from Django REST Framework
     if (response && typeof response === 'object' && 'results' in response) {
       return response.results;
@@ -34,20 +37,20 @@ const ChatService = {
 
   // Get a specific chat room with messages
   getChatRoom: async (id: number): Promise<ChatRoom> =>
-    ApiClient.get<ChatRoom>(`/chat-rooms/${id}/`),
+    ApiClient.get<ChatRoom>(`${routes.CHAT_ROOMS}${id}/`),
 
   // Create a new chat room
   createChatRoom: async (data: CreateChatRoomData): Promise<ChatRoom> =>
-    ApiClient.post<ChatRoom>('/chat-rooms/', data),
+    ApiClient.post<ChatRoom>(routes.CHAT_ROOMS, data),
 
   // Send a message in a chat room
   sendMessage: async (roomId: number, data: SendMessageRequest): Promise<ChatMessage> =>
-    ApiClient.post<ChatMessage>(`/chat-rooms/${roomId}/send_message/`, data),
+    ApiClient.post<ChatMessage>(`${routes.CHAT_ROOMS}${roomId}/send_message/`, data),
 
   // Get messages for a room
   getMessages: async (roomId: number): Promise<ChatMessage[]> => {
     const response = await ApiClient.get<PaginatedResponse<ChatMessage> | ChatMessage[]>(
-      `/messages/?room_id=${roomId}`
+      `${routes.MESSAGES}?room_id=${roomId}`
     );
     // Handle paginated response from Django REST Framework
     if (response && typeof response === 'object' && 'results' in response) {
@@ -58,7 +61,8 @@ const ChatService = {
   },
 
   // Delete a chat room
-  deleteChatRoom: async (id: number): Promise<void> => ApiClient.delete<void>(`/chat-rooms/${id}/`),
+  deleteChatRoom: async (id: number): Promise<void> =>
+    ApiClient.delete<void>(`${routes.CHAT_ROOMS}${id}/`),
 
   // Convert audio blob to base64
   audioBlobToBase64: async (blob: Blob): Promise<string> => {
@@ -80,7 +84,7 @@ const ChatService = {
     roomId: number,
     data: PatientContextData
   ): Promise<{ success: boolean; message: string }> =>
-    ApiClient.post(`/chat-rooms/${roomId}/add_patient_context/`, data),
+    ApiClient.post(`${routes.CHAT_ROOMS}${roomId}/add_patient_context/`, data),
 
   // Get doctor assistance from RAG
   getDoctorAssistance: async (
@@ -89,7 +93,7 @@ const ChatService = {
     assistance: string;
     context: string[];
     suggestions: string[];
-  }> => ApiClient.get(`/chat-rooms/${roomId}/get_doctor_assistance/`),
+  }> => ApiClient.get(`${routes.CHAT_ROOMS}${roomId}/get_doctor_assistance/`),
 };
 
 export default ChatService;

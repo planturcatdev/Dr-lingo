@@ -1,6 +1,16 @@
 from django.contrib import admin
 
-from api.models import ChatMessage, ChatRoom
+from api.models import ChatMessage, ChatRoom, Collection
+
+
+class CollectionInline(admin.TabularInline):
+    model = Collection
+    fields = ["name", "collection_type", "is_global", "items_count"]
+    readonly_fields = ["items_count"]
+    extra = 0
+
+    def items_count(self, obj):
+        return obj.items.count()
 
 
 @admin.register(ChatRoom)
@@ -21,6 +31,7 @@ class ChatRoomAdmin(admin.ModelAdmin):
     search_fields = ["name", "patient_name"]
     list_filter = ["room_type", "is_active", "patient_language", "doctor_language", "created_at"]
     ordering = ["-created_at"]
+    inlines = [CollectionInline]
 
     fieldsets = (
         ("Basic Information", {"fields": ("name", "room_type", "is_active")}),

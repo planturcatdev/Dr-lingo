@@ -5,13 +5,19 @@ A real-time medical translation platform enabling seamless communication between
 ## Features
 
 - **Real-time Translation**: Instant bidirectional translation between 15+ languages
-- **Voice Support**: Speech-to-text and text-to-speech capabilities
+- **Voice Support**: Speech-to-text (Whisper) and text-to-speech (XTTS v2) capabilities
+- **Text-to-Speech**: AI-generated audio for translated messages with voice cloning
+- **PDF Document Processing**: Upload and extract text from PDFs (including OCR for scanned documents)
+- **Task Monitoring**: Real-time Celery task tracking and status monitoring via API
+- **AI Configuration API**: Frontend fetches AI models/providers from backend for consistency
 - **Knowledge Base**: Global reference data (medical terminology, language guides, cultural context) used for ALL translations
 - **Patient Context**: Per-patient details (medical history, cultural background) linked to specific chat rooms
 - **RAG Integration**: Context-aware responses combining Knowledge Base and Patient Context
 - **Cultural Sensitivity**: AI considers cultural context for appropriate translations
 - **Role-Based Access**: Patient, Doctor, and Admin roles with appropriate permissions
 - **Admin Panel**: Full management of users, chat rooms, Knowledge Base, and Patient Context
+- **Profile Management**: User profile settings and preferences
+- **404 Handling**: Proper not-found page for improved navigation
 
 ## Tech Stack
 
@@ -20,7 +26,10 @@ A real-time medical translation platform enabling seamless communication between
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS |
 | Backend | Django 5, Django REST Framework |
 | Database | PostgreSQL |
-| AI Providers | Google Gemini, Ollama (local) |
+| AI Providers | Ollama (local), Google Gemini (cloud) |
+| Translation | Ollama with gemma3-translator model |
+| Text-to-Speech | Coqui TTS with XTTS v2 model |
+| Speech-to-Text | Whisper.cpp |
 | Task Queue | Celery + Redis |
 | Event Bus | RabbitMQ |
 | Auth | JWT (SimpleJWT) |
@@ -66,18 +75,30 @@ A real-time medical translation platform enabling seamless communication between
 
 ## Quick Start
 
-### 1. Start Infrastructure Services
+### 1. Start Infrastructure Services (Docker)
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 This starts:
 - PostgreSQL (port 5435)
 - Redis (port 6380)
-- RabbitMQ (port 5673, management UI: 15673)
+- RabbitMQ (port 5673, management UI: 15672)
+- Whisper STT (port 9000)
 
-### 2. Setup Backend
+### 2. Start Ollama (Local AI)
+
+```bash
+# Start Ollama server
+ollama serve
+
+# Pull required models
+ollama pull zongwei/gemma3-translator:4b
+ollama pull nomic-embed-text:v1.5
+```
+
+### 3. Setup Backend
 
 ```bash
 cd services
@@ -87,7 +108,7 @@ poetry install
 
 # Copy environment file
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
+# Edit .env - set AI_PROVIDER=ollama
 
 # Run migrations
 poetry run python manage.py migrate
@@ -96,19 +117,24 @@ poetry run python manage.py migrate
 poetry run python manage.py createsuperuser
 ```
 
-### 3. Setup Frontend
+### 4. Setup Frontend
 
 ```bash
 cd client
 
 # Install dependencies
-npm install
-
-# Build for production
-npm run build
+yarn install
 ```
 
-### 4. Start All Services
+### 5. Add TTS Speaker Reference Files
+
+For voice cloning, add 6-10 second WAV files:
+```bash
+mkdir -p services/media/tts_speakers
+# Add doctor_reference.wav and patient_reference.wav
+```
+
+### 6. Start All Services
 
 You'll need multiple terminals:
 
@@ -118,28 +144,43 @@ cd services
 poetry run python manage.py runserver
 ```
 
-**Terminal 2 - Celery Worker:**
+**Terminal 2 - Celery Workers (Local - NOT Docker):**
+
+Option A: Two separate workers (recommended for TTS):
 ```bash
+# Terminal 2a - Main worker (translation, rag, etc.)
 cd services
-poetry run celery -A config worker -l info -Q default,audio,translation,rag,assistance,maintenance
+poetry run celery -A config worker -l INFO -Q default,translation,rag,assistance,maintenance -c 4
+
+# Terminal 2b - Audio/TTS worker (single process to avoid model conflicts)
+cd services
+poetry run celery -A config worker -l INFO -Q audio -c 1
 ```
 
-**Terminal 3 - Celery Beat (scheduled tasks):**
+Option B: Single worker (simpler but slower):
 ```bash
 cd services
-poetry run celery -A config beat -l info
+poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance -c 1
 ```
 
-**Terminal 4 - Event Consumer (optional):**
-```bash
-cd services
-poetry run python manage.py run_event_consumer
-```
+> **Note:** TTS uses the XTTS v2 model (~1.8GB) which is not thread-safe. Running the audio queue with `-c 1` ensures only one TTS task runs at a time, preventing model loading conflicts.
 
-**Terminal 5 - Frontend Dev Server:**
+**Terminal 3 - Frontend Dev Server:**
 ```bash
 cd client
-npm run dev
+yarn dev
+```
+
+**Terminal 4 - Celery Beat (Optional - Scheduled Tasks):**
+```bash
+cd services
+poetry run celery -A config beat -l INFO
+```
+
+**Terminal 5 - Flower (Optional - Monitoring):**
+```bash
+cd services
+poetry run celery -A config flower --port=5555
 ```
 
 ## Access Points
@@ -150,7 +191,8 @@ npm run dev
 | Backend API | http://localhost:8000/api/ |
 | Django Admin | http://localhost:8000/admin/ |
 | API Docs (Swagger) | http://localhost:8000/api/docs/swagger/ |
-| RabbitMQ Management | http://localhost:15673 (guest/guest) |
+| RabbitMQ Management | http://localhost:15672 (guest/guest) |
+| Flower (Celery) | http://localhost:5555 |
 
 ## Environment Variables
 
@@ -162,30 +204,36 @@ DEBUG=True
 SECRET_KEY=your-secret-key
 ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Database
+# Database (Docker)
 DATABASE_URL=postgresql://dr-lingo_user:dr-lingo_pass@localhost:5435/dr-lingo_db
 
 # CORS
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174
 
-# AI Provider (gemini or ollama)
-AI_PROVIDER=gemini
-GEMINI_API_KEY=your-gemini-api-key
+# AI Provider (ollama or gemini)
+AI_PROVIDER=ollama
 
-# Ollama (for local AI)
+# Ollama (Local AI - Recommended)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_TRANSLATION_MODEL=granite:latest
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text:latest
+OLLAMA_TRANSLATION_MODEL=zongwei/gemma3-translator:4b
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text:v1.5
 
-# Redis
+# Gemini (Cloud AI - Optional)
+# AI_PROVIDER=gemini
+# GEMINI_API_KEY=your-gemini-api-key
+
+# Redis (Docker)
 REDIS_URL=redis://localhost:6380/1
 
 # Celery
 CELERY_BROKER_URL=redis://localhost:6380/0
 CELERY_RESULT_BACKEND=redis://localhost:6380/0
 
-# RabbitMQ
+# RabbitMQ (Docker)
 RABBITMQ_URL=amqp://guest:guest@localhost:5673/
+
+# Whisper (Docker or Local)
+WHISPER_API_URL=http://localhost:9000
 ```
 
 ## Supported Languages
@@ -209,26 +257,34 @@ RABBITMQ_URL=amqp://guest:guest@localhost:5673/
 - `POST /api/auth/login/` - Login (returns JWT)
 - `POST /api/auth/token/refresh/` - Refresh JWT token
 - `GET /api/auth/me/` - Get current user
+- `PUT /api/auth/profile/` - Update user profile
+
+### System
+- `GET /api/health/` - Health check
+- `GET /api/config/ai/` - Get AI configuration (models, providers)
+- `GET /api/celery/status/` - Celery worker status
+- `GET /api/tasks/{task_id}/` - Get task status
 
 ### Chat
-- `GET /api/chat/rooms/` - List chat rooms
-- `POST /api/chat/rooms/` - Create chat room
-- `GET /api/chat/rooms/{id}/messages/` - Get messages
-- `POST /api/chat/rooms/{id}/send/` - Send message
+- `GET /api/chat-rooms/` - List chat rooms
+- `POST /api/chat-rooms/` - Create chat room
+- `GET /api/chat-rooms/{id}/` - Get chat room details
+- `GET /api/chat-rooms/{id}/messages/` - Get messages
+- `POST /api/chat-rooms/{id}/send/` - Send message
 
 ### RAG Collections (Knowledge Base & Patient Context)
-- `GET /api/rag/collections/` - List all collections
-- `GET /api/rag/collections/?collection_type=knowledge_base` - List Knowledge Bases
-- `GET /api/rag/collections/?collection_type=patient_context` - List Patient Contexts
-- `POST /api/rag/collections/` - Create collection (specify `collection_type`)
-- `POST /api/rag/collections/{id}/items/` - Add document to collection
-- `POST /api/rag/collections/{id}/query/` - Query collection
+- `GET /api/collections/` - List all collections
+- `GET /api/collections/?collection_type=knowledge_base` - List Knowledge Bases
+- `GET /api/collections/?collection_type=patient_context` - List Patient Contexts
+- `POST /api/collections/` - Create collection (specify `collection_type`)
+- `POST /api/collections/{id}/add_document/` - Add document (supports PDF upload)
+- `POST /api/collections/{id}/query/` - Query collection
 
 ### Admin
-- `GET /api/admin/users/` - List users
-- `POST /api/admin/users/` - Create user
-- `PUT /api/admin/users/{id}/` - Update user
-- `DELETE /api/admin/users/{id}/` - Delete user
+- `GET /api/users/` - List users
+- `POST /api/users/` - Create user
+- `PUT /api/users/{id}/` - Update user
+- `DELETE /api/users/{id}/` - Delete user
 
 ## Development Commands
 
@@ -251,11 +307,21 @@ poetry run python manage.py createsuperuser
 # Run tests
 poetry run python manage.py test
 
-# Celery worker
-poetry run celery -A config worker -l info
+# Celery workers (recommended: two separate workers)
+# Main worker - handles translation, rag, assistance
+poetry run celery -A config worker -l INFO -Q default,translation,rag,assistance,maintenance -c 4
 
-# Celery beat
-poetry run celery -A config beat -l info
+# Audio/TTS worker - single process for TTS model
+poetry run celery -A config worker -l INFO -Q audio -c 1
+
+# Or single worker (simpler but slower)
+poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance -c 1
+
+# Celery beat (scheduled tasks)
+poetry run celery -A config beat -l INFO
+
+# Flower (monitoring)
+poetry run celery -A config flower --port=5555
 ```
 
 ### Frontend
@@ -263,32 +329,42 @@ poetry run celery -A config beat -l info
 cd client
 
 # Dev server
-npm run dev
+yarn dev
 
 # Build
-npm run build
+yarn build
 
 # Lint
-npm run lint
-
-# Format
-npm run format
+yarn lint
 ```
 
-### Docker
+### Docker (Infrastructure Only)
 ```bash
-# Start all services
-docker-compose up -d
+# Start infrastructure services
+docker compose up -d
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Reset database
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
+```
+
+### Ollama
+```bash
+# Start Ollama
+ollama serve
+
+# Pull models
+ollama pull zongwei/gemma3-translator:4b
+ollama pull nomic-embed-text:v1.5
+
+# List models
+ollama list
 ```
 
 ## RAG Architecture

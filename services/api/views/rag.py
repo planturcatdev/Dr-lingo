@@ -3,11 +3,13 @@ import logging
 from django.conf import settings
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from api.models import Collection, CollectionItem
 from api.serializers import CollectionItemSerializer, CollectionSerializer, RAGQuerySerializer
 from api.services.rag_service import RAGService
+from api.utils.pdf_utils import extract_text_from_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +22,83 @@ class CollectionViewSet(viewsets.ModelViewSet):
 
     queryset = Collection.objects.all()
     serializer_class = CollectionSerializer
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser, JSONParser])
     def add_document(self, request, pk=None):
-        """Add a document to the collection. Uses Celery for async embedding generation if available."""
+        """Add a document to the collection. Uses Celery for async processing of PDFs."""
         collection = self.get_object()
+
+        logger.info("=== ADD DOCUMENT REQUEST ===")
+        logger.info(f"Content-Type: {request.content_type}")
 
         name = request.data.get("name")
         content = request.data.get("content")
+        file_obj = request.FILES.get("file")
         description = request.data.get("description", "")
         metadata = request.data.get("metadata", {})
-        async_mode = request.data.get("async", False)
+        async_mode = request.data.get("async", "true").lower() in ("true", "1", "yes")
+
+        logger.info(f"Parsed: name={name}, file_obj={file_obj}, content_len={len(content) if content else 0}")
+
+        # Handle PDF file upload - always process async due to potential OCR
+        if file_obj and file_obj.name.lower().endswith(".pdf"):
+            if not name:
+                name = file_obj.name.replace(".pdf", "").replace(".PDF", "")
+
+            if CELERY_ENABLED:
+                # Save file and process asynchronously
+                from api.tasks.pdf_tasks import process_pdf_document_async, save_uploaded_pdf
+
+                try:
+                    file_path = save_uploaded_pdf(file_obj)
+                    task = process_pdf_document_async.delay(
+                        collection_id=collection.id,
+                        file_path=file_path,
+                        name=name,
+                        description=description,
+                        metadata=metadata or {},
+                    )
+
+                    return Response(
+                        {
+                            "status": "processing",
+                            "message": "PDF uploaded and queued for processing. Text extraction (including OCR if needed) will run in background.",
+                            "task_id": task.id,
+                            "name": name,
+                        },
+                        status=status.HTTP_202_ACCEPTED,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to queue PDF processing: {e}", exc_info=True)
+                    return Response(
+                        {"error": f"Failed to queue PDF processing: {str(e)}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+            else:
+                # Synchronous fallback - try direct extraction only
+                try:
+                    logger.info(f"Extracting text from PDF (sync): {file_obj.name}, size={file_obj.size}")
+                    content = extract_text_from_pdf(file_obj)
+                    logger.info(f"PDF extraction result: {len(content) if content else 0} characters")
+                    if not content:
+                        return Response(
+                            {
+                                "error": "Could not extract text from PDF. It may be a scanned document requiring OCR. Enable Celery for async OCR processing."
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                except Exception as e:
+                    logger.error(f"PDF extraction failed: {e}", exc_info=True)
+                    return Response({"error": f"Failed to process PDF: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
         if not name or not content:
-            return Response({"error": "Name and content are required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "error": "Name and content (or a PDF file) are required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             # Create item without embedding first if async mode
@@ -64,9 +129,9 @@ class CollectionViewSet(viewsets.ModelViewSet):
 
             # Synchronous processing (default)
             rag_service = RAGService(collection)
-            item = rag_service.add_document(name=name, content=content, description=description, metadata=metadata)
+            items = rag_service.add_document(name=name, content=content, description=description, metadata=metadata)
 
-            serializer = CollectionItemSerializer(item)
+            serializer = CollectionItemSerializer(items, many=True)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         except Exception as e:
             logger.error(f"Error adding document: {e}")
@@ -170,3 +235,12 @@ class CollectionItemViewSet(viewsets.ModelViewSet):
         if collection_id:
             queryset = queryset.filter(collection_id=collection_id)
         return queryset
+
+    def perform_create(self, serializer):
+        """Trigger background embedding generation for the new item."""
+        item = serializer.save()
+
+        # Queue embedding generation
+        from api.tasks.rag_tasks import process_document_async
+
+        process_document_async.delay(document_id=item.id)

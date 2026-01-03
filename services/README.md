@@ -8,12 +8,16 @@ Django REST Framework backend for the Medical Translation Chat System.
 # Install dependencies
 poetry install
 
+# Install TTS dependencies (requires Python <3.12)
+poetry add "TTS>=0.22.0" --python ">=3.11,<3.12"
+poetry add torchcodec
+
 # Activate virtual environment
 poetry shell
 
 # Setup environment
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
+# Edit .env - set AI_PROVIDER=ollama
 
 # Run migrations
 python manage.py migrate
@@ -26,6 +30,35 @@ python manage.py runserver
 ```
 
 Server runs at `http://localhost:8000`
+
+## Running Celery
+
+For optimal performance, run two separate Celery workers:
+
+**Option A: Two Workers (Recommended for TTS)**
+```bash
+# Terminal 1 - Main worker (translation, rag, etc.)
+poetry run celery -A config worker -l INFO -Q default,translation,rag,assistance,maintenance -c 4
+
+# Terminal 2 - Audio/TTS worker (single process)
+poetry run celery -A config worker -l INFO -Q audio -c 1
+```
+
+**Option B: Single Worker (Simpler)**
+```bash
+poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance -c 1
+```
+
+> **Note:** TTS uses the XTTS v2 model (~1.8GB) which is not thread-safe. The audio queue should run with `-c 1` to prevent model conflicts.
+
+**Optional Services:**
+```bash
+# Celery beat (scheduled tasks)
+poetry run celery -A config beat -l INFO
+
+# Flower (monitoring)
+poetry run celery -A config flower --port=5555
+```
 
 ## Project Structure
 
@@ -58,6 +91,8 @@ services/
 │   │   ├── __init__.py          # Message bus registration (Celery signals)
 │   │   ├── audio_tasks.py       # Audio transcription
 │   │   ├── translation_tasks.py # Translation with caching
+│   │   ├── tts_tasks.py         # Text-to-speech generation
+│   │   ├── pdf_tasks.py         # PDF processing with OCR
 │   │   ├── rag_tasks.py         # Document processing
 │   │   ├── dataset_tasks.py     # Hugging Face dataset import
 │   │   ├── assistance_tasks.py  # AI assistance
@@ -118,9 +153,13 @@ services/
 - `POST /api/collections/{id}/query/` - Query collection
 - `POST /api/collections/{id}/reindex/` - Reindex collection
 
+### RAG Optimization
+The system generates query embeddings **once** and reuses them across all relevant collections (Global Knowledge Base + Patient Context + Linked KBs) during a single request. This prevents CPU overload and ensures fast response times even when querying multiple vector stores.
+
 ### Health & Tasks
 - `GET /api/health/` - API health check
-- `GET /api/celery/status/` - Celery status
+- `GET /api/config/ai/` - Get AI configuration (models, providers)
+- `GET /api/celery/status/` - Celery worker status
 - `GET /api/tasks/{task_id}/` - Get task status
 
 ### Admin Panel
@@ -136,30 +175,36 @@ DEBUG=True
 SECRET_KEY=your-secret-key-here
 ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Database (port 5435 for Docker)
+# Database (Docker - port 5435)
 DATABASE_URL=postgresql://dr-lingo_user:dr-lingo_pass@localhost:5435/dr-lingo_db
 
 # CORS
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
-# AI Provider (gemini or ollama)
-AI_PROVIDER=gemini
-GEMINI_API_KEY=your-gemini-api-key
+# AI Provider (ollama or gemini)
+AI_PROVIDER=ollama
 
-# Ollama (for local AI)
+# Ollama (Local AI - Recommended)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_TRANSLATION_MODEL=granite:latest
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text:latest
+OLLAMA_TRANSLATION_MODEL=zongwei/gemma3-translator:4b
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text:v1.5
 
-# Redis (port 6380 for Docker)
+# Gemini (Cloud AI - Optional)
+# AI_PROVIDER=gemini
+# GEMINI_API_KEY=your-gemini-api-key
+
+# Redis (Docker - port 6380)
 REDIS_URL=redis://localhost:6380/1
 
 # Celery
 CELERY_BROKER_URL=redis://localhost:6380/0
 CELERY_RESULT_BACKEND=redis://localhost:6380/0
 
-# RabbitMQ (port 5673 for Docker)
+# RabbitMQ (Docker - port 5673)
 RABBITMQ_URL=amqp://guest:guest@localhost:5673/
+
+# Whisper (Docker or Local)
+WHISPER_API_URL=http://localhost:9000
 ```
 
 ## Database

@@ -1,10 +1,3 @@
-"""
-RabbitMQ Producer Implementation.
-
-A blocking producer for RabbitMQ that uses one connection and channel per thread.
-Connects on first publish in the thread. Uses publisher confirms. Retries once on failure.
-"""
-
 import json
 import logging
 import threading

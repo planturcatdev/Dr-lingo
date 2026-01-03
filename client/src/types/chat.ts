@@ -54,14 +54,17 @@ export interface ChatMessage {
   room: number;
   sender_type: SenderType;
   original_text: string;
+  original_language: string;
   translated_text: string;
-  source_language: string;
-  target_language: string;
-  audio_file?: string;
+  translated_language: string;
+  has_image: boolean;
+  image_url?: string;
+  image_description?: string;
+  has_audio: boolean;
+  audio_url?: string;
   audio_duration?: number;
-  is_audio_message: boolean;
-  cultural_notes?: string;
-  rag_context?: string;
+  audio_transcription?: string;
+  tts_audio_url?: string;
   created_at: string;
 }
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { Person, Logout, Settings } from '@mui/icons-material';
+import { Person, Logout, Settings, AdminPanelSettings, Terminal } from '@mui/icons-material';
 
 export default function UserMenu() {
   const { user, logout, isAuthenticated } = useAuth();
@@ -50,6 +51,36 @@ export default function UserMenu() {
             </div>
 
             <div className="p-2">
+              <Link
+                to="/profile"
+                onClick={() => setIsOpen(false)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+              >
+                <Person className="w-4 h-4" />
+                Profile
+              </Link>
+
+              {user.role === 'admin' && (
+                <>
+                  <Link
+                    to="/admin"
+                    onClick={() => setIsOpen(false)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+                  >
+                    <AdminPanelSettings className="w-4 h-4 text-purple-600" />
+                    Admin Panel
+                  </Link>
+                  <Link
+                    to="/admin?tab=task-monitor"
+                    onClick={() => setIsOpen(false)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+                  >
+                    <Terminal className="w-4 h-4 text-blue-600" />
+                    Task Monitor
+                  </Link>
+                </>
+              )}
+
               <button
                 onClick={() => {
                   setIsOpen(false);

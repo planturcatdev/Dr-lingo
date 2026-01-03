@@ -46,13 +46,43 @@ def process_document_async(self, document_id: int):
             logger.info(f"Document {document_id} already has embeddings")
             return {"status": "already_processed", "document_id": document_id}
 
-        # Generate embedding
         rag_service = RAGService(item.collection)
-        embedding = rag_service._generate_embedding(item.content)
 
-        # Store embedding
-        item.embedding = embedding
-        item.save()
+        # Check if chunking is needed
+        chunks = rag_service._chunk_text(item.content)
+
+        if len(chunks) > 1:
+            logger.info(f"Document {document_id} needs chunking into {len(chunks)} parts")
+            # First chunk updates the current item
+            first_embedding = rag_service._generate_embedding(chunks[0])
+            item.content = chunks[0]
+            item.embedding = first_embedding
+            item.name = f"{item.name} (Part 1)"
+            item.save()
+
+            # Additional chunks create new items
+            new_item_ids = [item.id]
+            for i, chunk_content in enumerate(chunks[1:], start=2):
+                embedding = rag_service._generate_embedding(chunk_content)
+                new_item = CollectionItem.objects.create(
+                    collection=item.collection,
+                    name=f"{item.name.replace(' (Part 1)', '')} (Part {i})",
+                    description=item.description,
+                    content=chunk_content,
+                    metadata={**(item.metadata or {}), "chunk_index": i - 1, "total_chunks": len(chunks)},
+                    embedding=embedding,
+                )
+                new_item_ids.append(new_item.id)
+
+            processed_id = new_item_ids
+            embedding_size = len(first_embedding)
+        else:
+            # Single chunk processing
+            embedding = rag_service._generate_embedding(item.content)
+            item.embedding = embedding
+            item.save()
+            processed_id = document_id
+            embedding_size = len(embedding)
 
         # Publish event
         publish_event(
@@ -61,15 +91,16 @@ def process_document_async(self, document_id: int):
                 "document_id": document_id,
                 "collection_id": item.collection_id,
                 "name": item.name,
+                "parts_count": len(chunks),
             },
         )
 
-        logger.info(f"Document {document_id} processed successfully")
+        logger.info(f"Document {document_id} processed successfully into {len(chunks)} parts")
 
         return {
             "status": "success",
-            "document_id": document_id,
-            "embedding_size": len(embedding) if embedding else 0,
+            "document_id": processed_id,
+            "embedding_size": embedding_size,
         }
 
     except CollectionItem.DoesNotExist:

@@ -165,3 +165,36 @@ def log_transcription(payload):
     logger.info(
         f"Audio transcribed for message {payload.get('message_id')}: " f"{payload.get('transcription', '')[:50]}..."
     )
+
+
+@subscribe("document.processed")
+def log_document_processed(payload):
+    """Log valid document processing events."""
+    logger.info(f"RAG Document processed: {payload.get('name', 'Unknown')} (ID: {payload.get('document_id')})")
+
+
+@subscribe("dataset.import_started")
+def log_dataset_import_started(payload):
+    """Log dataset import started events."""
+    logger.info(f"Dataset import started: {payload.get('lang_name')} ({payload.get('lang_code')})")
+
+
+@subscribe("dataset.import_completed")
+def log_dataset_import_completed(payload):
+    """Log dataset import completed events."""
+    logger.info(
+        f"Dataset import completed for collection {payload.get('collection_id')}. "
+        f"Created: {payload.get('created')}, Skipped: {payload.get('skipped')}"
+    )
+
+
+@subscribe("dataset.import_failed")
+def log_dataset_import_failed(payload):
+    """Log dataset import failed events."""
+    logger.error(f"Dataset import failed: {payload.get('error')}")
+
+
+@subscribe("dataset.batch_import_started")
+def log_batch_import_started(payload):
+    """Log batch dataset import events."""
+    logger.info(f"Batch import started for languages: {payload.get('languages')}")

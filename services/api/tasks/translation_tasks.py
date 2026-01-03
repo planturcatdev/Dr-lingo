@@ -52,7 +52,7 @@ def translate_text_async(
     """
     from api.events import publish_event
     from api.models import ChatMessage
-    from api.services.gemini_service import get_gemini_service
+    from api.services.ai import get_translation_service
     from api.services.rag_service import get_translation_context
 
     logger.info(f"Starting translation for message {message_id}")
@@ -104,8 +104,8 @@ def translate_text_async(
             ]
 
             # Translate
-            gemini = get_gemini_service()
-            translated_text = gemini.translate_with_context(
+            translator = get_translation_service()
+            translated_text = translator.translate_with_context(
                 text=text,
                 source_lang=source_lang,
                 target_lang=target_lang,
@@ -133,6 +133,20 @@ def translate_text_async(
                 "target_lang": target_lang,
             },
         )
+
+        # Trigger TTS generation for the translated text
+        try:
+            from api.tasks.tts_tasks import generate_tts_async
+
+            generate_tts_async.delay(
+                message_id=message_id,
+                text=translated_text,
+                language=target_lang,
+                speaker_type=message.sender_type,
+            )
+            logger.info(f"TTS task queued for message {message_id}")
+        except Exception as e:
+            logger.warning(f"Failed to queue TTS task: {e}")
 
         logger.info(f"Translation completed for message {message_id}")
 

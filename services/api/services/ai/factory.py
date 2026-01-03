@@ -47,37 +47,53 @@ class AIProviderFactory:
         # Instance-level cache (not class-level) so each factory has its own instances
         self._instances: dict[str, object] = {}
 
-    def get_translation_service(self) -> BaseTranslationService:
-        """Get translation service for configured provider."""
-        cache_key = f"translation_{self.provider.value}"
+    def get_translation_service(self, model_name: str | None = None) -> BaseTranslationService:
+        """
+        Get translation service for configured provider.
+
+        Args:
+            model_name: Optional model to override defaults
+        """
+        # Include model in cache key if provided
+        cache_suffix = f"_{model_name}" if model_name else ""
+        cache_key = f"translation_{self.provider.value}{cache_suffix}"
 
         if cache_key not in self._instances:
             if self.provider == AIProvider.GEMINI:
                 from .gemini_provider import GeminiTranslationService
 
-                self._instances[cache_key] = GeminiTranslationService()
+                self._instances[cache_key] = GeminiTranslationService(model_name=model_name)
             elif self.provider == AIProvider.OLLAMA:
                 from .ollama_provider import OllamaTranslationService
 
-                self._instances[cache_key] = OllamaTranslationService()
+                self._instances[cache_key] = OllamaTranslationService(model_name=model_name)
             else:
                 raise ValueError(f"Unknown provider: {self.provider}")
 
         return self._instances[cache_key]
 
-    def get_embedding_service(self) -> BaseEmbeddingService:
-        """Get embedding service for configured provider."""
-        cache_key = f"embedding_{self.provider.value}"
+        return self._instances[cache_key]
+
+    def get_embedding_service(self, model_name: str | None = None) -> BaseEmbeddingService:
+        """
+        Get embedding service for configured provider.
+
+        Args:
+            model_name: Optional model to override defaults
+        """
+        # Include model in cache key if provided
+        cache_suffix = f"_{model_name}" if model_name else ""
+        cache_key = f"embedding_{self.provider.value}{cache_suffix}"
 
         if cache_key not in self._instances:
             if self.provider == AIProvider.GEMINI:
                 from .gemini_provider import GeminiEmbeddingService
 
-                self._instances[cache_key] = GeminiEmbeddingService()
+                self._instances[cache_key] = GeminiEmbeddingService(model_name=model_name)
             elif self.provider == AIProvider.OLLAMA:
                 from .ollama_provider import OllamaEmbeddingService
 
-                self._instances[cache_key] = OllamaEmbeddingService()
+                self._instances[cache_key] = OllamaEmbeddingService(model_name=model_name)
             else:
                 raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -122,19 +138,28 @@ class AIProviderFactory:
 
         return self._instances[cache_key]
 
-    def get_completion_service(self) -> BaseCompletionService:
-        """Get text completion service for configured provider."""
-        cache_key = f"completion_{self.provider.value}"
+        return self._instances[cache_key]
+
+    def get_completion_service(self, model_name: str | None = None) -> BaseCompletionService:
+        """
+        Get text completion service for configured provider.
+
+        Args:
+            model_name: Optional model to override defaults
+        """
+        # Include model in cache key if provided
+        cache_suffix = f"_{model_name}" if model_name else ""
+        cache_key = f"completion_{self.provider.value}{cache_suffix}"
 
         if cache_key not in self._instances:
             if self.provider == AIProvider.GEMINI:
                 from .gemini_provider import GeminiCompletionService
 
-                self._instances[cache_key] = GeminiCompletionService()
+                self._instances[cache_key] = GeminiCompletionService(model_name=model_name)
             elif self.provider == AIProvider.OLLAMA:
                 from .ollama_provider import OllamaCompletionService
 
-                self._instances[cache_key] = OllamaCompletionService()
+                self._instances[cache_key] = OllamaCompletionService(model_name=model_name)
             else:
                 raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -148,14 +173,14 @@ def _get_factory() -> AIProviderFactory:
     return AIProviderFactory()
 
 
-def get_translation_service() -> BaseTranslationService:
+def get_translation_service(model_name: str | None = None) -> BaseTranslationService:
     """Get translation service with default provider."""
-    return _get_factory().get_translation_service()
+    return _get_factory().get_translation_service(model_name=model_name)
 
 
-def get_embedding_service() -> BaseEmbeddingService:
+def get_embedding_service(model_name: str | None = None) -> BaseEmbeddingService:
     """Get embedding service with default provider."""
-    return _get_factory().get_embedding_service()
+    return _get_factory().get_embedding_service(model_name=model_name)
 
 
 def get_transcription_service() -> BaseTranscriptionService:
@@ -163,6 +188,6 @@ def get_transcription_service() -> BaseTranscriptionService:
     return _get_factory().get_transcription_service()
 
 
-def get_completion_service() -> BaseCompletionService:
+def get_completion_service(model_name: str | None = None) -> BaseCompletionService:
     """Get completion service with default provider."""
-    return _get_factory().get_completion_service()
+    return _get_factory().get_completion_service(model_name=model_name)

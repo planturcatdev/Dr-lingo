@@ -8,6 +8,7 @@ from api.views import (
     CollectionViewSet,
     ItemViewSet,
     UserViewSet,
+    ai_config,
     celery_status,
     change_password,
     confirm_otp_setup,
@@ -34,6 +35,7 @@ router.register(r"users", UserViewSet, basename="user")
 urlpatterns = [
     path("", include(router.urls)),
     path("health/", health_check, name="health-check"),
+    path("config/ai/", ai_config, name="ai-config"),
     # Celery task status endpoints
     path("tasks/<str:task_id>/", task_status, name="task-status"),
     path("celery/status/", celery_status, name="celery-status"),
