@@ -33,14 +33,30 @@ Server runs at `http://localhost:8000`
 
 ## Running Celery
 
-```bash
-# Start Celery worker (all queues)
-poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance
+For optimal performance, run two separate Celery workers:
 
-# Start Celery beat (scheduled tasks) - optional
+**Option A: Two Workers (Recommended for TTS)**
+```bash
+# Terminal 1 - Main worker (translation, rag, etc.)
+poetry run celery -A config worker -l INFO -Q default,translation,rag,assistance,maintenance -c 4
+
+# Terminal 2 - Audio/TTS worker (single process)
+poetry run celery -A config worker -l INFO -Q audio -c 1
+```
+
+**Option B: Single Worker (Simpler)**
+```bash
+poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance -c 1
+```
+
+> **Note:** TTS uses the XTTS v2 model (~1.8GB) which is not thread-safe. The audio queue should run with `-c 1` to prevent model conflicts.
+
+**Optional Services:**
+```bash
+# Celery beat (scheduled tasks)
 poetry run celery -A config beat -l INFO
 
-# Start Flower (monitoring) - optional
+# Flower (monitoring)
 poetry run celery -A config flower --port=5555
 ```
 
@@ -75,6 +91,8 @@ services/
 │   │   ├── __init__.py          # Message bus registration (Celery signals)
 │   │   ├── audio_tasks.py       # Audio transcription
 │   │   ├── translation_tasks.py # Translation with caching
+│   │   ├── tts_tasks.py         # Text-to-speech generation
+│   │   ├── pdf_tasks.py         # PDF processing with OCR
 │   │   ├── rag_tasks.py         # Document processing
 │   │   ├── dataset_tasks.py     # Hugging Face dataset import
 │   │   ├── assistance_tasks.py  # AI assistance
@@ -135,9 +153,13 @@ services/
 - `POST /api/collections/{id}/query/` - Query collection
 - `POST /api/collections/{id}/reindex/` - Reindex collection
 
+### RAG Optimization
+The system generates query embeddings **once** and reuses them across all relevant collections (Global Knowledge Base + Patient Context + Linked KBs) during a single request. This prevents CPU overload and ensures fast response times even when querying multiple vector stores.
+
 ### Health & Tasks
 - `GET /api/health/` - API health check
-- `GET /api/celery/status/` - Celery status
+- `GET /api/config/ai/` - Get AI configuration (models, providers)
+- `GET /api/celery/status/` - Celery worker status
 - `GET /api/tasks/{task_id}/` - Get task status
 
 ### Admin Panel

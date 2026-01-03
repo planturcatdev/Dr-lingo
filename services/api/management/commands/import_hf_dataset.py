@@ -155,12 +155,14 @@ class Command(BaseCommand):
         ai_provider = getattr(settings, "AI_PROVIDER", "gemini")
         if ai_provider == "ollama":
             embedding_provider = Collection.EmbeddingProvider.OLLAMA
-            embedding_model = getattr(settings, "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:v1.5")
+            embedding_model = getattr(settings, "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:latest")
+            completion_model = getattr(settings, "OLLAMA_COMPLETION_MODEL", "granite3.3:8b")
             embedding_dimensions = 768  # nomic-embed-text outputs 768 dimensions
             self.stdout.write(f"Using Ollama embeddings: {embedding_model}")
         else:
             embedding_provider = Collection.EmbeddingProvider.GEMINI
             embedding_model = "text-embedding-004"
+            completion_model = "gemini-2.0-flash-exp"
             embedding_dimensions = 768
             self.stdout.write(f"Using Gemini embeddings: {embedding_model}")
 
@@ -176,6 +178,7 @@ class Command(BaseCommand):
                 "is_global": True,
                 "embedding_provider": embedding_provider,
                 "embedding_model": embedding_model,
+                "completion_model": completion_model,
                 "embedding_dimensions": embedding_dimensions,
                 "chunking_strategy": Collection.ChunkingStrategy.NO_CHUNKING,
             },
@@ -193,6 +196,9 @@ class Command(BaseCommand):
 
     def _import_dataset(self, collection, lang_code, split, streaming, limit, async_mode):
         """Load dataset from Hugging Face and import into collection."""
+        import os
+        import time
+
         from datasets import Audio, load_dataset
 
         from api.services.rag_service import RAGService
@@ -203,37 +209,66 @@ class Command(BaseCommand):
         self.stdout.write(f"  Repository: {repo_id}")
         self.stdout.write(f"  Configuration: {lang_code}")
 
-        try:
-            if streaming:
-                # Load in streaming mode WITHOUT decoding audio (avoids librosa dependency)
-                ds = load_dataset(repo_id, lang_code, split=split, streaming=True)
-                # Disable audio decoding - this avoids needing librosa/soundfile
-                # See: https://huggingface.co/docs/datasets/audio_load#disable-audio-decoding
-                try:
-                    ds = ds.cast_column("audio", Audio(decode=False))
-                    ds = ds.remove_columns(["audio"])
-                    self.stdout.write("Disabled audio decoding and removed column (text-only import)")
-                except Exception:
-                    pass  # Column might not exist
-                self.stdout.write(self.style.SUCCESS("Dataset loaded in streaming mode"))
-            else:
-                ds = load_dataset(repo_id, lang_code, split=split)
-                total_items = len(ds)
-                self.stdout.write(self.style.SUCCESS(f"Dataset loaded: {total_items} items"))
-        except Exception as e:
-            error_msg = str(e)
-            if "gated dataset" in error_msg.lower():
-                raise CommandError(
-                    f"This is a GATED DATASET - you need to request access first!\n\n"
-                    f"Steps to get access:\n"
-                    f"  1. Visit: https://huggingface.co/datasets/{repo_id}\n"
-                    f"  2. Click 'Access repository' button\n"
-                    f"  3. Accept the dataset terms/license\n"
-                    f"  4. Wait for approval (usually instant for this dataset)\n"
-                    f"  5. Ensure your HF_TOKEN has 'Read' permission\n\n"
-                    f"Then run this command again."
+        # Set extended timeout for Hugging Face downloads (default is 10s, too short!)
+        os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "120")
+
+        # Retry logic for network issues
+        max_retries = 5
+        retry_delay = 5  # seconds, will increase exponentially
+
+        for attempt in range(max_retries):
+            try:
+                if streaming:
+                    # Load in streaming mode WITHOUT decoding audio (avoids librosa dependency)
+                    ds = load_dataset(repo_id, lang_code, split=split, streaming=True)
+                    # Disable audio decoding - this avoids needing librosa/soundfile
+                    # See: https://huggingface.co/docs/datasets/audio_load#disable-audio-decoding
+                    try:
+                        ds = ds.cast_column("audio", Audio(decode=False))
+                        ds = ds.remove_columns(["audio"])
+                        self.stdout.write("Disabled audio decoding and removed column (text-only import)")
+                    except Exception:
+                        pass  # Column might not exist
+                    self.stdout.write(self.style.SUCCESS("Dataset loaded in streaming mode"))
+                else:
+                    ds = load_dataset(repo_id, lang_code, split=split)
+                    total_items = len(ds)
+                    self.stdout.write(self.style.SUCCESS(f"Dataset loaded: {total_items} items"))
+                break  # Success, exit retry loop
+
+            except Exception as e:
+                error_msg = str(e)
+
+                # Check for gated dataset error (no retry needed)
+                if "gated dataset" in error_msg.lower():
+                    raise CommandError(
+                        f"This is a GATED DATASET - you need to request access first!\n\n"
+                        f"Steps to get access:\n"
+                        f"  1. Visit: https://huggingface.co/datasets/{repo_id}\n"
+                        f"  2. Click 'Access repository' button\n"
+                        f"  3. Accept the dataset terms/license\n"
+                        f"  4. Wait for approval (usually instant for this dataset)\n"
+                        f"  5. Ensure your HF_TOKEN has 'Read' permission\n\n"
+                        f"Then run this command again."
+                    )
+
+                # Check for timeout/network errors (retry these)
+                is_timeout = any(
+                    x in error_msg.lower() for x in ["timeout", "timed out", "connection", "network", "reset by peer"]
                 )
-            raise CommandError(f"Failed to load dataset: {e}")
+
+                if is_timeout and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2**attempt)  # Exponential backoff
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f"Network timeout (attempt {attempt + 1}/{max_retries}). " f"Retrying in {wait_time}s..."
+                        )
+                    )
+                    time.sleep(wait_time)
+                    continue
+
+                # Final failure
+                raise CommandError(f"Failed to load dataset after {attempt + 1} attempts: {e}")
 
         # Initialize RAG service for embedding generation (if not async)
         rag_service = None

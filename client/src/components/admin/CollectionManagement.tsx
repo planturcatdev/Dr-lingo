@@ -9,6 +9,7 @@ import {
   Article,
   Close,
   CreateNewFolder,
+  AttachFile,
 } from '@mui/icons-material';
 import AdminService, {
   Collection,
@@ -299,7 +300,9 @@ function CollectionModal({
               </label>
               <select
                 value={formData.embedding_provider}
-                onChange={(e) => setFormData({ ...formData, embedding_provider: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, embedding_provider: e.target.value as any })
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:border-black focus:ring-1 focus:ring-black outline-none"
               >
                 <option value="gemini">Gemini</option>
@@ -338,7 +341,9 @@ function CollectionModal({
               </label>
               <select
                 value={formData.chunking_strategy}
-                onChange={(e) => setFormData({ ...formData, chunking_strategy: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, chunking_strategy: e.target.value as any })
+                }
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:border-black focus:ring-1 focus:ring-black outline-none"
               >
                 <option value="fixed-length">Fixed Length</option>
@@ -547,6 +552,7 @@ function AddItemModal({
     description: '',
     content: '',
   });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const { showError, showSuccess } = useToast();
 
@@ -554,7 +560,17 @@ function AddItemModal({
     e.preventDefault();
     try {
       setLoading(true);
-      await AdminService.createCollectionItem(formData);
+
+      if (selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf')) {
+        const formDataPayload = new FormData();
+        formDataPayload.append('file', selectedFile);
+        formDataPayload.append('name', formData.name || selectedFile.name);
+        formDataPayload.append('description', formData.description || '');
+        await AdminService.addDocument(collectionId, formDataPayload);
+      } else {
+        await AdminService.createCollectionItem(formData);
+      }
+
       showSuccess('Document added');
       onSuccess();
     } catch (err) {
@@ -562,6 +578,33 @@ function AddItemModal({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.name.toLowerCase().endsWith('.pdf')) {
+      setSelectedFile(file);
+      setFormData((prev) => ({
+        ...prev,
+        name: prev.name || file.name.replace(/\.[^/.]+$/, ''),
+        content: '[PDF Content - automatically extracted by server]',
+      }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setFormData((prev) => ({
+        ...prev,
+        name: prev.name || file.name.replace(/\.[^/.]+$/, ''),
+        content: content,
+      }));
+      setSelectedFile(null);
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -603,15 +646,88 @@ function AddItemModal({
             />
           </div>
 
+          {/* File Upload */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Content *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Upload File (optional)
+            </label>
+            <div
+              className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+                selectedFile
+                  ? 'border-green-300 bg-green-50'
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              <input
+                type="file"
+                accept=".txt,.md,.csv,.json,.pdf"
+                onChange={handleFileUpload}
+                className="hidden"
+                id="file-upload-item"
+              />
+              {!selectedFile ? (
+                <label htmlFor="file-upload-item" className="cursor-pointer group block">
+                  <div className="flex flex-col items-center">
+                    <AttachFile className="w-8 h-8 text-gray-400 group-hover:text-gray-600 mb-2" />
+                    <p className="text-sm text-gray-600">
+                      <span className="text-blue-600 font-semibold">Click to upload</span> or drag
+                      and drop
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      TXT, MD, CSV, JSON, PDF files supported
+                    </p>
+                  </div>
+                </label>
+              ) : (
+                <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-200">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <AttachFile className="text-green-600" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-semibold text-gray-900 truncate max-w-[200px]">
+                        {selectedFile.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedFile(null);
+                      if (
+                        formData.content === '[PDF Content - automatically extracted by server]'
+                      ) {
+                        setFormData((prev) => ({ ...prev, content: '' }));
+                      }
+                    }}
+                    className="p-1 hover:bg-red-50 rounded-full text-red-500 transition-colors"
+                  >
+                    <Close className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              {selectedFile ? 'Extracted Content (Read-only)' : 'Content *'}
+            </label>
             <textarea
-              placeholder="Paste or type the document content here..."
+              placeholder={
+                selectedFile
+                  ? 'PDF content will be processed by server...'
+                  : 'Paste or type the document content here...'
+              }
               value={formData.content}
               onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 bg-white focus:border-black focus:ring-1 focus:ring-black outline-none"
-              rows={8}
+              className={`w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:border-black focus:ring-1 focus:ring-black outline-none ${selectedFile ? 'bg-gray-50' : 'bg-white'}`}
+              rows={selectedFile ? 3 : 8}
               required
+              readOnly={!!selectedFile}
             />
           </div>
 

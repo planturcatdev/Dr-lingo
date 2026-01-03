@@ -7,12 +7,17 @@ A real-time medical translation platform enabling seamless communication between
 - **Real-time Translation**: Instant bidirectional translation between 15+ languages
 - **Voice Support**: Speech-to-text (Whisper) and text-to-speech (XTTS v2) capabilities
 - **Text-to-Speech**: AI-generated audio for translated messages with voice cloning
+- **PDF Document Processing**: Upload and extract text from PDFs (including OCR for scanned documents)
+- **Task Monitoring**: Real-time Celery task tracking and status monitoring via API
+- **AI Configuration API**: Frontend fetches AI models/providers from backend for consistency
 - **Knowledge Base**: Global reference data (medical terminology, language guides, cultural context) used for ALL translations
 - **Patient Context**: Per-patient details (medical history, cultural background) linked to specific chat rooms
 - **RAG Integration**: Context-aware responses combining Knowledge Base and Patient Context
 - **Cultural Sensitivity**: AI considers cultural context for appropriate translations
 - **Role-Based Access**: Patient, Doctor, and Admin roles with appropriate permissions
 - **Admin Panel**: Full management of users, chat rooms, Knowledge Base, and Patient Context
+- **Profile Management**: User profile settings and preferences
+- **404 Handling**: Proper not-found page for improved navigation
 
 ## Tech Stack
 
@@ -139,11 +144,26 @@ cd services
 poetry run python manage.py runserver
 ```
 
-**Terminal 2 - Celery Worker (Local - NOT Docker):**
+**Terminal 2 - Celery Workers (Local - NOT Docker):**
+
+Option A: Two separate workers (recommended for TTS):
+```bash
+# Terminal 2a - Main worker (translation, rag, etc.)
+cd services
+poetry run celery -A config worker -l INFO -Q default,translation,rag,assistance,maintenance -c 4
+
+# Terminal 2b - Audio/TTS worker (single process to avoid model conflicts)
+cd services
+poetry run celery -A config worker -l INFO -Q audio -c 1
+```
+
+Option B: Single worker (simpler but slower):
 ```bash
 cd services
-poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance
+poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance -c 1
 ```
+
+> **Note:** TTS uses the XTTS v2 model (~1.8GB) which is not thread-safe. Running the audio queue with `-c 1` ensures only one TTS task runs at a time, preventing model loading conflicts.
 
 **Terminal 3 - Frontend Dev Server:**
 ```bash
@@ -237,26 +257,34 @@ WHISPER_API_URL=http://localhost:9000
 - `POST /api/auth/login/` - Login (returns JWT)
 - `POST /api/auth/token/refresh/` - Refresh JWT token
 - `GET /api/auth/me/` - Get current user
+- `PUT /api/auth/profile/` - Update user profile
+
+### System
+- `GET /api/health/` - Health check
+- `GET /api/config/ai/` - Get AI configuration (models, providers)
+- `GET /api/celery/status/` - Celery worker status
+- `GET /api/tasks/{task_id}/` - Get task status
 
 ### Chat
-- `GET /api/chat/rooms/` - List chat rooms
-- `POST /api/chat/rooms/` - Create chat room
-- `GET /api/chat/rooms/{id}/messages/` - Get messages
-- `POST /api/chat/rooms/{id}/send/` - Send message
+- `GET /api/chat-rooms/` - List chat rooms
+- `POST /api/chat-rooms/` - Create chat room
+- `GET /api/chat-rooms/{id}/` - Get chat room details
+- `GET /api/chat-rooms/{id}/messages/` - Get messages
+- `POST /api/chat-rooms/{id}/send/` - Send message
 
 ### RAG Collections (Knowledge Base & Patient Context)
-- `GET /api/rag/collections/` - List all collections
-- `GET /api/rag/collections/?collection_type=knowledge_base` - List Knowledge Bases
-- `GET /api/rag/collections/?collection_type=patient_context` - List Patient Contexts
-- `POST /api/rag/collections/` - Create collection (specify `collection_type`)
-- `POST /api/rag/collections/{id}/items/` - Add document to collection
-- `POST /api/rag/collections/{id}/query/` - Query collection
+- `GET /api/collections/` - List all collections
+- `GET /api/collections/?collection_type=knowledge_base` - List Knowledge Bases
+- `GET /api/collections/?collection_type=patient_context` - List Patient Contexts
+- `POST /api/collections/` - Create collection (specify `collection_type`)
+- `POST /api/collections/{id}/add_document/` - Add document (supports PDF upload)
+- `POST /api/collections/{id}/query/` - Query collection
 
 ### Admin
-- `GET /api/admin/users/` - List users
-- `POST /api/admin/users/` - Create user
-- `PUT /api/admin/users/{id}/` - Update user
-- `DELETE /api/admin/users/{id}/` - Delete user
+- `GET /api/users/` - List users
+- `POST /api/users/` - Create user
+- `PUT /api/users/{id}/` - Update user
+- `DELETE /api/users/{id}/` - Delete user
 
 ## Development Commands
 
@@ -279,8 +307,15 @@ poetry run python manage.py createsuperuser
 # Run tests
 poetry run python manage.py test
 
-# Celery worker (all queues)
-poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance
+# Celery workers (recommended: two separate workers)
+# Main worker - handles translation, rag, assistance
+poetry run celery -A config worker -l INFO -Q default,translation,rag,assistance,maintenance -c 4
+
+# Audio/TTS worker - single process for TTS model
+poetry run celery -A config worker -l INFO -Q audio -c 1
+
+# Or single worker (simpler but slower)
+poetry run celery -A config worker -l INFO -Q default,audio,translation,rag,assistance,maintenance -c 1
 
 # Celery beat (scheduled tasks)
 poetry run celery -A config beat -l INFO

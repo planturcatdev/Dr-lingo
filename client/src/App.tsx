@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react
 import TranslationChatPage from './pages/TranslationChatPage';
 import AuthPage from './pages/AuthPage';
 import AdminPage from './pages/AdminPage';
+import ProfilePage from './pages/ProfilePage';
+import NotFoundPage from './pages/NotFoundPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { UserMenu, ProtectedRoute } from './components/auth';
@@ -76,7 +78,7 @@ function Home() {
 
 // Header with user menu
 function Header({ hide }: { hide?: boolean }) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   if (!isAuthenticated || hide) return null;
 
@@ -91,15 +93,7 @@ function Header({ hide }: { hide?: boolean }) {
             <Link to="/translation-chat" className="text-gray-400 hover:text-white text-sm">
               Chat
             </Link>
-            {(user?.role === 'admin' || user?.is_superuser) && (
-              <Link
-                to="/admin"
-                className="flex items-center gap-1 text-gray-400 hover:text-white text-sm"
-              >
-                <AdminPanelSettings className="w-4 h-4" />
-                Admin
-              </Link>
-            )}
+            {/* Only showing Admin in UserMenu drop down as per request */}
           </nav>
         </div>
         <UserMenu />
@@ -145,6 +139,15 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
     </div>

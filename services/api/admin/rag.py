@@ -10,18 +10,21 @@ class CollectionAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "name",
+        "collection_type",
+        "chat_room",
         "embedding_provider",
         "embedding_model",
-        "embedding_dimensions",
         "items_count",
+        "is_global",
         "created_at",
     ]
     search_fields = ["name", "description"]
-    list_filter = ["embedding_provider", "chunking_strategy", "created_at"]
+    list_filter = ["collection_type", "is_global", "embedding_provider", "chunking_strategy", "created_at"]
     ordering = ["-created_at"]
 
     fieldsets = (
-        ("Basic Information", {"fields": ("name", "description")}),
+        ("Basic Information", {"fields": ("name", "description", "collection_type", "is_global")}),
+        ("Context Linking", {"fields": ("chat_room", "knowledge_bases")}),
         ("Embedding Configuration", {"fields": ("embedding_provider", "embedding_model", "embedding_dimensions")}),
         ("Completion Configuration", {"fields": ("completion_model",)}),
         (
@@ -77,3 +80,12 @@ class CollectionItemAdmin(admin.ModelAdmin):
         return "No embedding generated"
 
     embedding_info.short_description = "Embedding Info"
+
+    def save_model(self, request, obj, form, change):
+        """Trigger background indexing when saving from admin."""
+        super().save_model(request, obj, form, change)
+
+        # Trigger async processing (this handles chunking and embedding)
+        from api.tasks.rag_tasks import process_document_async
+
+        process_document_async.delay(document_id=obj.id)

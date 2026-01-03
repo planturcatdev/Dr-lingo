@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { InfoOutlined, CheckCircleOutline, CancelOutlined } from '@mui/icons-material';
+import {
+  InfoOutlined,
+  CheckCircleOutline,
+  CancelOutlined,
+  AttachFile,
+  Close,
+} from '@mui/icons-material';
 import ChatService from '../api/services/ChatService';
 import RAGService, { Collection } from '../api/services/RAGService';
 import { useToast } from '../contexts/ToastContext';
+import { useAIConfig } from '../hooks/useAIConfig';
 
 interface AddPatientContextProps {
   roomId: number;
@@ -20,13 +27,13 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
   onSuccess,
 }) => {
   const { showError, showSuccess } = useToast();
+  const { config: aiConfig } = useAIConfig();
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollection, setSelectedCollection] = useState<number | null>(
     currentCollection || null
   );
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'select' | 'form'>(currentCollection ? 'form' : 'select');
-  const [creatingCollection, setCreatingCollection] = useState(false);
   const [createNewCollection, setCreateNewCollection] = useState(false);
   const [formData, setFormData] = useState({
     patient_name: '',
@@ -34,6 +41,7 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
     medical_history: '',
     language_notes: '',
   });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
@@ -102,13 +110,16 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
           const newCollection = await RAGService.createCollection({
             name: `${roomName} - Patient Context - ${timestamp}`,
             description: `Medical and cultural context for ${roomName}`,
-            embedding_provider: 'gemini',
-            embedding_model: 'text-embedding-004',
-            embedding_dimensions: 768,
-            completion_model: 'h-exp',
+            embedding_provider: aiConfig.embedding_provider,
+            embedding_model: aiConfig.embedding_model,
+            embedding_dimensions: aiConfig.embedding_dimensions,
+            completion_model: aiConfig.completion_model,
+            collection_type: 'patient_context',
+            chat_room: roomId,
+            is_global: false,
             chunking_strategy: 'fixed-length',
-            chunk_length: 1000,
-            chunk_overlap: 200,
+            chunk_length: aiConfig.chunk_length,
+            chunk_overlap: aiConfig.chunk_overlap,
           });
           collectionId = newCollection.id;
           setStatus({ type: 'success', message: 'Collection created! Adding patient context...' });
@@ -127,9 +138,25 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
         return;
       }
 
-      // Add patient context to RAG collection
+      // Use FormData if a file is selected, or if we want to combine text and file
+      if (selectedFile) {
+        setStatus({ type: 'success', message: 'Uploading PDF document...' });
+        const ragFormData = new FormData();
+        ragFormData.append('file', selectedFile);
+        ragFormData.append('name', formData.patient_name || selectedFile.name);
+        ragFormData.append(
+          'description',
+          `Medical record for ${formData.patient_name || roomName}`
+        );
+
+        await RAGService.addDocument(collectionId, ragFormData);
+      }
+
+      // Add patient context text fields to RAG collection/link it to the room
+      // Even if text fields are empty, we call this to link the collection to the room
       await ChatService.addPatientContext(roomId, {
         ...formData,
+        patient_name: formData.patient_name || selectedFile?.name || 'Unknown Patient',
         collection_id: collectionId,
       });
 
@@ -144,6 +171,22 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
       setStatus({ type: 'error', message: 'Failed to add patient context' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSelectedFile(file);
+
+    // Auto-fill patient name from filename if not already set
+    if (!formData.patient_name) {
+      const fileName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+      setFormData((prev) => ({
+        ...prev,
+        patient_name: fileName,
+      }));
     }
   };
 
@@ -261,9 +304,67 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
           {/* Step 2: Add Context Form */}
           {step === 'form' && (
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* PDF Upload Section */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <label className="block text-sm font-bold mb-3 text-gray-900 flex items-center gap-2">
+                  <AttachFile className="w-4 h-4" />
+                  Upload Medical Record (PDF)
+                </label>
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                    selectedFile
+                      ? 'border-green-300 bg-green-50'
+                      : 'border-gray-300 bg-white hover:border-gray-400'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="patient-pdf-upload"
+                  />
+                  {!selectedFile ? (
+                    <label htmlFor="patient-pdf-upload" className="cursor-pointer group block">
+                      <AttachFile className="w-8 h-8 text-gray-400 group-hover:text-gray-600 mx-auto mb-2" />
+                      <p className="text-sm text-gray-600">
+                        <span className="text-blue-600 font-semibold">Click to upload PDF</span> or
+                        drag and drop
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Medical records will be automatically indexed for RAG
+                      </p>
+                    </label>
+                  ) : (
+                    <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-green-100 rounded-lg">
+                          <AttachFile className="text-green-600" />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-sm font-semibold text-gray-900 truncate max-w-[250px]">
+                            {selectedFile.name}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFile(null)}
+                        className="p-1 hover:bg-red-50 rounded-full text-red-500 transition-colors"
+                      >
+                        <Close className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-semibold mb-2 text-gray-700">
-                  Patient Name
+                  Patient Name *
                 </label>
                 <input
                   type="text"
@@ -285,13 +386,9 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
                     setFormData({ ...formData, cultural_background: e.target.value })
                   }
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none text-black"
-                  rows={4}
+                  rows={3}
                   placeholder="Cultural beliefs, practices, dietary restrictions, religious considerations, etc."
-                  required
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Include cultural beliefs, practices, and sensitivities
-                </p>
               </div>
 
               <div>
@@ -302,13 +399,9 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
                   value={formData.medical_history}
                   onChange={(e) => setFormData({ ...formData, medical_history: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none text-black"
-                  rows={4}
+                  rows={3}
                   placeholder="Previous conditions, medications, allergies, surgeries, chronic illnesses, etc."
-                  required
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Previous conditions, medications, allergies, etc.
-                </p>
               </div>
 
               <div>
@@ -319,12 +412,9 @@ const AddPatientContext: React.FC<AddPatientContextProps> = ({
                   value={formData.language_notes}
                   onChange={(e) => setFormData({ ...formData, language_notes: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:border-black focus:ring-2 focus:ring-black/10 focus:outline-none text-black"
-                  rows={3}
+                  rows={2}
                   placeholder="Preferred terms, idioms, communication style, literacy level, etc."
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Preferred terms, idioms, communication preferences
-                </p>
               </div>
 
               {/* Status Message */}

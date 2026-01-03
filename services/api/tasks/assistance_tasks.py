@@ -193,7 +193,7 @@ def generate_cultural_tips(patient_language: str, doctor_language: str):
 
     Useful for onboarding new doctors or general guidance.
     """
-    from api.services.gemini_service import get_gemini_service
+    from api.services.ai import get_completion_service
 
     cache_key = f"cultural_tips:{patient_language}:{doctor_language}"
     cached = cache.get(cache_key)
@@ -201,9 +201,10 @@ def generate_cultural_tips(patient_language: str, doctor_language: str):
     if cached:
         return {"status": "cached", "tips": cached}
 
-    gemini = get_gemini_service()
+    ai_service = get_completion_service()
 
     prompt = f"""
+System:
 Provide cultural communication tips for a doctor who speaks {doctor_language}
 communicating with a patient who speaks {patient_language}.
 
@@ -215,11 +216,13 @@ Include:
 5. Common misunderstandings to avoid
 
 Format as a concise, actionable guide.
+
+Assistant:
 """
 
-    # Generate tips using Gemini
+    # Generate tips using AI service
     try:
-        tips = gemini.generate_text(prompt)
+        tips = ai_service.generate(prompt)
     except Exception:
         # Fallback if generation fails
         tips = f"Cultural tips for {patient_language} <-> {doctor_language} communication"

@@ -1,10 +1,12 @@
 from django.conf import settings
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 
 @api_view(["GET"])
+@permission_classes([AllowAny])
 def health_check(request):
     """
     Health check endpoint to verify the API is running.
@@ -16,6 +18,55 @@ def health_check(request):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def ai_config(request):
+    """
+    Get current AI configuration for frontend defaults.
+
+    Returns:
+        AI provider settings including models for translation, completion, and embeddings.
+    """
+    ai_provider = getattr(settings, "AI_PROVIDER", "ollama")
+
+    config = {
+        "ai_provider": ai_provider,
+    }
+
+    if ai_provider == "ollama":
+        config.update(
+            {
+                "translation_model": getattr(settings, "OLLAMA_TRANSLATION_MODEL", "granite:latest"),
+                "completion_model": getattr(settings, "OLLAMA_COMPLETION_MODEL", "granite3.3:8b"),
+                "embedding_model": getattr(settings, "OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:v1.5"),
+                "embedding_provider": "ollama",
+                "ollama_base_url": getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434"),
+            }
+        )
+    elif ai_provider == "gemini":
+        config.update(
+            {
+                "translation_model": getattr(settings, "GEMINI_MODEL", "gemini-1.5-flash"),
+                "completion_model": getattr(settings, "GEMINI_MODEL", "gemini-1.5-flash"),
+                "embedding_model": getattr(settings, "GEMINI_EMBEDDING_MODEL", "text-embedding-004"),
+                "embedding_provider": "gemini",
+            }
+        )
+
+    # Common defaults
+    config.update(
+        {
+            "embedding_dimensions": 768,
+            "chunking_strategy": "fixed-length",
+            "chunk_length": 1000,
+            "chunk_overlap": 200,
+        }
+    )
+
+    return Response(config, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def task_status(request, task_id):
     """
     Check the status of a Celery task.
@@ -58,6 +109,7 @@ def task_status(request, task_id):
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def celery_status(request):
     """
     Check if Celery is available and workers are running.

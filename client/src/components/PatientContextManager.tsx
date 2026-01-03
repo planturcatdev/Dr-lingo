@@ -13,6 +13,7 @@ import {
 } from '@mui/icons-material';
 import ChatService from '../api/services/ChatService';
 import RAGService, { Collection } from '../api/services/RAGService';
+import { useAIConfig } from '../hooks/useAIConfig';
 
 interface PatientContextManagerProps {
   roomId: number;
@@ -27,6 +28,7 @@ const PatientContextManager: React.FC<PatientContextManagerProps> = ({
   currentCollection,
   onUpdate,
 }) => {
+  const { config: aiConfig } = useAIConfig();
   const [roomData, setRoomData] = useState<any>(null);
   const [collectionData, setCollectionData] = useState<any>(null);
   const [contextItems, setContextItems] = useState<any[]>([]);
@@ -139,13 +141,16 @@ const PatientContextManager: React.FC<PatientContextManagerProps> = ({
         const newCollection = await RAGService.createCollection({
           name: `${roomName} - Patient Context - ${timestamp}`,
           description: `Medical and cultural context for ${roomName}`,
-          embedding_provider: 'gemini',
-          embedding_model: 'text-embedding-004',
-          embedding_dimensions: 768,
-          completion_model: 'gemini-2.0-flash-exp',
+          embedding_provider: aiConfig.embedding_provider,
+          embedding_model: aiConfig.embedding_model,
+          embedding_dimensions: aiConfig.embedding_dimensions,
+          completion_model: aiConfig.completion_model,
+          collection_type: 'patient_context',
+          chat_room: roomId,
+          is_global: false,
           chunking_strategy: 'fixed-length',
-          chunk_length: 1000,
-          chunk_overlap: 200,
+          chunk_length: aiConfig.chunk_length,
+          chunk_overlap: aiConfig.chunk_overlap,
         });
         collectionId = newCollection.id;
         setStatus({ type: 'success', message: 'Collection created! Adding patient context...' });

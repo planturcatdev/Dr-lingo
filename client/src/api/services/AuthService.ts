@@ -1,5 +1,5 @@
 import httpClient from '../HttpClient';
-import { API_BASE_URL } from '../routes';
+import routes, { API_BASE_URL } from '../routes';
 import type { User, UserRole, RegisterData } from '../../types';
 
 export type { User, UserRole, RegisterData };
@@ -22,7 +22,7 @@ const AuthService = {
       user: User;
       requires_otp_setup?: boolean;
       requires_otp_verify?: boolean;
-    }>(`${API_BASE_URL}/auth/login/`, { username, password });
+    }>(`${API_BASE_URL}${routes.AUTH_LOGIN}`, { username, password });
 
     const { user, requires_otp_setup, requires_otp_verify } = response.data;
 
@@ -43,9 +43,12 @@ const AuthService = {
    * Verify OTP code for two-factor authentication
    */
   async verifyOTP(code: string): Promise<{ user: User }> {
-    const response = await httpClient.post<{ user: User }>(`${API_BASE_URL}/auth/verify-otp/`, {
-      otp_token: code,
-    });
+    const response = await httpClient.post<{ user: User }>(
+      `${API_BASE_URL}${routes.AUTH_VERIFY_OTP}`,
+      {
+        otp_token: code,
+      }
+    );
 
     sessionUser = response.data.user;
     localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -58,7 +61,7 @@ const AuthService = {
    */
   async setupOTP(): Promise<{ qr_code: string; secret: string }> {
     const response = await httpClient.post<{ qr_code: string; secret: string }>(
-      `${API_BASE_URL}/auth/setup-otp/`
+      `${API_BASE_URL}${routes.AUTH_SETUP_OTP}`
     );
     return response.data;
   },
@@ -68,7 +71,7 @@ const AuthService = {
    */
   async confirmOTPSetup(code: string): Promise<{ success: boolean; user: User }> {
     const response = await httpClient.post<{ success: boolean; user: User }>(
-      `${API_BASE_URL}/auth/confirm-otp-setup/`,
+      `${API_BASE_URL}${routes.AUTH_CONFIRM_OTP_SETUP}`,
       { otp_token: code }
     );
 
@@ -83,7 +86,7 @@ const AuthService = {
    * Register a new user
    */
   async register(data: RegisterData): Promise<{ user: User }> {
-    const response = await httpClient.post(`${API_BASE_URL}/auth/register/`, data);
+    const response = await httpClient.post(`${API_BASE_URL}${routes.AUTH_REGISTER}`, data);
     return response.data;
   },
 
@@ -92,7 +95,7 @@ const AuthService = {
    */
   async logout(): Promise<void> {
     try {
-      await httpClient.post(`${API_BASE_URL}/auth/logout/`);
+      await httpClient.post(`${API_BASE_URL}${routes.AUTH_LOGOUT}`);
     } catch (error) {
       if (error instanceof Error) {
         console.debug('Server logout failed, proceeding with client-side logout:', error.message);
@@ -106,7 +109,7 @@ const AuthService = {
    * Get current user profile
    */
   async getCurrentUser(): Promise<User> {
-    const response = await httpClient.get<User>(`${API_BASE_URL}/auth/me/`);
+    const response = await httpClient.get<User>(`${API_BASE_URL}${routes.AUTH_ME}`);
     sessionUser = response.data;
     localStorage.setItem('user', JSON.stringify(response.data));
     return response.data;
@@ -116,7 +119,7 @@ const AuthService = {
    * Update user profile
    */
   async updateProfile(data: Partial<User>): Promise<User> {
-    const response = await httpClient.patch<User>(`${API_BASE_URL}/auth/profile/`, data);
+    const response = await httpClient.patch<User>(`${API_BASE_URL}${routes.AUTH_PROFILE}`, data);
     localStorage.setItem('user', JSON.stringify(response.data));
     return response.data;
   },
@@ -125,7 +128,7 @@ const AuthService = {
    * Change password
    */
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    await httpClient.post(`${API_BASE_URL}/auth/change-password/`, {
+    await httpClient.post(`${API_BASE_URL}${routes.AUTH_CHANGE_PASSWORD}`, {
       old_password: oldPassword,
       new_password: newPassword,
     });

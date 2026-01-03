@@ -79,7 +79,7 @@ class OllamaTranslationService(BaseTranslationService):
         base_url: str | None = None,
     ):
         self.client = OllamaClient(base_url)
-        self.model = model_name or getattr(settings, "OLLAMA_TRANSLATION_MODEL", "granite3.3:8b")
+        self.model = model_name or getattr(settings, "OLLAMA_TRANSLATION_MODEL", "granite:latest")
 
     def translate(
         self,
@@ -92,16 +92,17 @@ class OllamaTranslationService(BaseTranslationService):
         source_name = get_language_name(source_lang)
         target_name = get_language_name(target_lang)
 
-        prompt = f"""<|system|>
+        prompt = f"""System:
 You are a professional medical translator. Translate accurately while being culturally sensitive.
 Map medical terms to understandable language for patients.
 Return ONLY the translated text, no explanations.
-<|end|>
-<|user|>
+
+User:
 Translate from {source_name} to {target_name}:
 {text}
-<|end|>
-<|assistant|>"""
+
+Assistant:
+"""
 
         result = self.client.generate(self.model, prompt)
         return result.strip()
@@ -127,20 +128,32 @@ Translate from {source_name} to {target_name}:
 
         rag_str = ""
         if rag_context:
-            rag_str = f"Cultural & Medical Context:\n{rag_context}\n"
+            rag_str = f"### Reference Information\n{rag_context}\n"
 
-        prompt = f"""<|system|>
-You are translating a {sender_type}'s message in a medical consultation.
-Use formal, professional language. Follow cultural guidelines.
-Return ONLY the translated text.
-<|end|>
-<|user|>
-{context_str}
+        prompt = f"""System:
+You are an expert medical translator specializing in {target_name}.
+Your goal is to provide accurate, culturally respectful translations for a {sender_type}.
+
+CRITICAL INSTRUCTIONS:
+1. Use the "Reference Information" below as your primary source of truth for terminology, grammar rules, and linguistic style.
+2. The Reference Information contains natural spoken language examples and transcriptions. Use them to infer correct {target_name} phrasing, noun class usage, and cultural tone.
+3. If the Reference Information contains specific noun class rules, APPLY THEM STRICTLY.
+4. Do not transliterate. Prioritize natural, idiomatic {target_name} as shown in the examples.
+5. Return ONLY the translated text.
+
+User:
 {rag_str}
-Translate from {source_name} to {target_name}:
-{text}
-<|end|>
-<|assistant|>"""
+
+### Conversation History
+{context_str}
+
+### Task
+Translate the following text from {source_name} to {target_name}:
+"{text}"
+
+Assistant:
+"""
+        logger.debug(f"Translation Prompt:\n{prompt}")
 
         result = self.client.generate(self.model, prompt)
         return result.strip()
@@ -261,15 +274,16 @@ class OllamaCompletionService(BaseCompletionService):
         context: str,
         max_tokens: int = 1000,
     ) -> str:
-        full_prompt = f"""<|system|>
+        full_prompt = f"""System:
 Use the following context to answer the question.
-<|end|>
-<|user|>
+
+User:
 Context:
 {context}
 
 Question:
 {prompt}
-<|end|>
-<|assistant|>"""
+
+Assistant:
+"""
         return self.generate(full_prompt, max_tokens)

@@ -21,9 +21,7 @@ function getCSRFToken(): string | null {
  */
 const httpClient = axios.create({
   timeout: 600000, // 10 minutes for AI operations
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: {}, // Let Axios handle default headers based on data type
   withCredentials: true, // Send cookies with requests
 });
 
@@ -39,6 +37,12 @@ httpClient.interceptors.request.use(
         config.headers.set('X-CSRFToken', csrfToken);
       }
     }
+
+    // Special handling for FormData (file uploads)
+    if (config.data instanceof FormData) {
+      config.headers.setContentType(null);
+    }
+
     return config;
   },
   (error: AxiosError) => Promise.reject(error)

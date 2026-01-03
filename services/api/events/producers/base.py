@@ -1,5 +1,3 @@
-"""Base producer interface for message bus implementations."""
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any

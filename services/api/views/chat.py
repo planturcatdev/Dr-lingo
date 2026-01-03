@@ -277,13 +277,19 @@ Provide relevant cultural context, medical information, or language nuances.
         """Process image data for a message."""
         try:
             image_bytes = base64.b64decode(image_data)
-            # Use Gemini for image analysis (Ollama doesn't support this well)
-            from api.services.gemini_service import get_gemini_service
+            # Use Gemini for image analysis (Ollama doesn't support this well yet)
+            try:
+                from api.services.gemini_service import get_gemini_service
 
-            gemini = get_gemini_service()
-            result = gemini.analyze_image(image_bytes, target_lang)
-            message.image_description = result.get("description")
-            message.save()
+                gemini = get_gemini_service()
+                result = gemini.analyze_image(image_bytes, target_lang)
+                message.image_description = result.get("description")
+                message.save()
+            except ValueError:
+                # Gemini not configured
+                logger.warning("Gemini not configured for image analysis")
+            except Exception as e:
+                logger.error(f"Image analysis failed: {e}")
         except Exception:
             pass
 
@@ -332,8 +338,23 @@ CHAT ROOM: {room.name}
 """
 
         try:
+            # Ensure the collection is marked as patient context for this room
+            if room.rag_collection:
+                updated = False
+                if room.rag_collection.collection_type != Collection.CollectionType.PATIENT_CONTEXT:
+                    room.rag_collection.collection_type = Collection.CollectionType.PATIENT_CONTEXT
+                    updated = True
+                if room.rag_collection.chat_room_id != room.id:
+                    room.rag_collection.chat_room_id = room.id
+                    updated = True
+                if room.rag_collection.is_global:
+                    room.rag_collection.is_global = False
+                    updated = True
+                if updated:
+                    room.rag_collection.save()
+
             rag_service = RAGService(room.rag_collection)
-            item = rag_service.add_document(
+            items = rag_service.add_document(
                 name=f"Patient Profile: {patient_name}",
                 content=document_content,
                 description=f"Comprehensive profile for {patient_name}",
@@ -349,7 +370,12 @@ CHAT ROOM: {room.name}
                 room.save()
 
             return Response(
-                {"status": "success", "message": "Patient context added", "document_id": item.id},
+                {
+                    "status": "success",
+                    "message": "Patient context added",
+                    "document_id": items[0].id if items else None,
+                    "parts_count": len(items),
+                },
                 status=status.HTTP_201_CREATED,
             )
 
@@ -421,6 +447,16 @@ Please suggest:
                     {"status": "success", "assistance": result["answer"], "sources": result.get("sources", [])},
                     status=status.HTTP_200_OK,
                 )
+            elif result.get("message") == "No relevant documents found":
+                # Don't treat empty results as server error
+                return Response(
+                    {
+                        "status": "success",
+                        "assistance": "I couldn't find enough relevant information in the knowledge base to provide specific assistance. Please try adding more documents to the collection.",
+                        "sources": [],
+                    },
+                    status=status.HTTP_200_OK,
+                )
             else:
                 return Response(
                     {"status": "error", "message": result.get("message", "Failed to generate assistance")},
@@ -428,7 +464,11 @@ Please suggest:
                 )
 
         except Exception as e:
-            return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error(f"Doctor assistance failed: {e}", exc_info=True)
+            return Response(
+                {"status": "error", "message": f"An unexpected error occurred: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class ChatMessageViewSet(viewsets.ReadOnlyModelViewSet):

@@ -31,7 +31,7 @@ class Collection(models.Model):
     )
     chat_room = models.ForeignKey(
         "ChatRoom",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="patient_contexts",
@@ -46,11 +46,11 @@ class Collection(models.Model):
         help_text="Knowledge base collections to use with this patient context.",
     )
     embedding_provider = models.CharField(
-        max_length=100, choices=EmbeddingProvider.choices, default=EmbeddingProvider.GEMINI
+        max_length=100, choices=EmbeddingProvider.choices, default=EmbeddingProvider.OLLAMA
     )
-    embedding_model = models.CharField(max_length=100, default="text-embedding-004")
+    embedding_model = models.CharField(max_length=100, default="nomic-embed-text:latest")
     embedding_dimensions = models.PositiveIntegerField(default=768)
-    completion_model = models.CharField(max_length=100, default="gemini-2.0-flash-exp")
+    completion_model = models.CharField(max_length=100, default="granite3.3:8b")
     chunking_strategy = models.CharField(
         max_length=100, choices=ChunkingStrategy.choices, default=ChunkingStrategy.FIXED_LENGTH
     )

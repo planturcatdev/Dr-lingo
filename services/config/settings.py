@@ -199,6 +199,7 @@ CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # Soft limit at 25 minutes
 # Task routing - different queues for different task types
 CELERY_TASK_ROUTES = {
     "api.tasks.audio_tasks.*": {"queue": "audio"},
+    "api.tasks.tts_tasks.*": {"queue": "audio"},  # TTS uses audio queue
     "api.tasks.translation_tasks.*": {"queue": "translation"},
     "api.tasks.rag_tasks.*": {"queue": "rag"},
     "api.tasks.assistance_tasks.*": {"queue": "assistance"},
@@ -257,10 +258,11 @@ MESSAGE_BUS_CONFIG = {
 
 # Used for: Local AI models (translation, embeddings, transcription)
 
-AI_PROVIDER = config("AI_PROVIDER", default="gemini")  # gemini, ollama
+AI_PROVIDER = config("AI_PROVIDER", default="ollama")  # gemini, ollama
 OLLAMA_BASE_URL = config("OLLAMA_BASE_URL", default="http://localhost:11434")
 OLLAMA_TRANSLATION_MODEL = config("OLLAMA_TRANSLATION_MODEL", default="granite:latest")
-OLLAMA_EMBEDDING_MODEL = config("OLLAMA_EMBEDDING_MODEL", default="nomic-embed-text:latest")
+OLLAMA_COMPLETION_MODEL = config("OLLAMA_COMPLETION_MODEL", default="granite3.3:8b")
+OLLAMA_EMBEDDING_MODEL = config("OLLAMA_EMBEDDING_MODEL", default="nomic-embed-text:v1.5")
 
 
 # Hugging Face Configuration

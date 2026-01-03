@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Dashboard,
@@ -10,12 +10,14 @@ import {
   AdminPanelSettings,
   MenuBook,
   Person,
+  Terminal,
 } from '@mui/icons-material';
 import AdminDashboard from '../components/admin/AdminDashboard';
 import UserManagement from '../components/admin/UserManagement';
 import ChatRoomManagement from '../components/admin/ChatRoomManagement';
 import KnowledgeBaseManagement from '../components/admin/KnowledgeBaseManagement';
 import PatientContextManagement from '../components/admin/PatientContextManagement';
+import TaskMonitor from '../components/admin/TaskMonitor';
 
 type AdminTab =
   | 'dashboard'
@@ -23,11 +25,25 @@ type AdminTab =
   | 'chatrooms'
   | 'knowledge-base'
   | 'patient-context'
+  | 'task-monitor'
   | 'settings';
 
 export default function AdminPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as AdminTab;
+    if (tabParam && tabs.some((t) => t.id === tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [searchParams]);
+
+  const handleTabChange = (tabId: AdminTab) => {
+    setActiveTab(tabId);
+    setSearchParams({ tab: tabId });
+  };
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Dashboard },
@@ -35,6 +51,7 @@ export default function AdminPage() {
     { id: 'chatrooms', label: 'Chat Rooms', icon: Chat },
     { id: 'knowledge-base', label: 'Knowledge Base', icon: MenuBook },
     { id: 'patient-context', label: 'Patient Context', icon: Person },
+    { id: 'task-monitor', label: 'Task Monitor', icon: Terminal },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -50,6 +67,8 @@ export default function AdminPage() {
         return <KnowledgeBaseManagement />;
       case 'patient-context':
         return <PatientContextManagement />;
+      case 'task-monitor':
+        return <TaskMonitor />;
       case 'settings':
         return (
           <div className="bg-white rounded-xl border border-gray-200 p-8">
@@ -102,7 +121,7 @@ export default function AdminPage() {
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as AdminTab)}
+                onClick={() => handleTabChange(tab.id as AdminTab)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm ${
                   activeTab === tab.id
                     ? 'bg-black text-white shadow-md'
